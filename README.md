@@ -137,6 +137,39 @@ curl -X POST http://127.0.0.1:4321/api/events/test-event/requests \
   -d "{\"singerName\":\"Michał\",\"songSource\":\"ising\",\"songSourceId\":\"9053\"}"
 ```
 
+Na Windows/Git Bash polskie znaki wpisane bezposrednio w `curl -d "{...}"` moga zostac wyslane w zlym kodowaniu terminala. Do recznych testow z polskimi znakami preferuj pliki JSON zapisane jako UTF-8.
+
+`event.json`:
+
+```json
+{
+  "id": "api-smoke",
+  "name": "Poza Nutą API Smoke"
+}
+```
+
+`request.json`:
+
+```json
+{
+  "singerName": "Michał",
+  "songSource": "ising",
+  "songSourceId": "9053"
+}
+```
+
+```bash
+curl -X POST http://127.0.0.1:4321/api/events \
+  -H "Content-Type: application/json; charset=utf-8" \
+  --data-binary @event.json
+```
+
+```bash
+curl -X POST http://127.0.0.1:4321/api/events/api-smoke/requests \
+  -H "Content-Type: application/json; charset=utf-8" \
+  --data-binary @request.json
+```
+
 Publiczna kolejka:
 
 ```bash

@@ -12,8 +12,14 @@ type TestApi = {
   baseUrl: string;
   config: ApiConfig;
   tempDir: string;
-  request: (method: string, path: string, body?: unknown, token?: string) => Promise<{ status: number; body: any }>;
+  request: (method: string, path: string, body?: unknown, token?: string) => Promise<ApiResponse>;
   close: () => Promise<void>;
+};
+
+type ApiResponse = {
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  body: any;
 };
 
 test("GET /health returns ok", async () => {
@@ -22,6 +28,7 @@ test("GET /health returns ok", async () => {
     const response = await api.request("GET", "/health");
 
     assert.equal(response.status, 200);
+    assert.equal(response.headers["content-type"], "application/json; charset=utf-8");
     assert.deepEqual(response.body, { ok: true });
   } finally {
     await cleanupApi(api);
@@ -76,6 +83,7 @@ test("GET /api/search without local index returns 409", async () => {
     const response = await api.request("GET", "/api/search?q=krolowa");
 
     assert.equal(response.status, 409);
+    assert.equal(response.headers["content-type"], "application/json; charset=utf-8");
     assert.equal(response.body.error, "missing_song_index");
     assert.equal(response.body.message, "Missing local song index. Run pnpm import:ising.");
   } finally {
@@ -91,6 +99,37 @@ test("POST /api/events creates an event without admin token when token is unset"
     assert.equal(response.status, 201);
     assert.equal(response.body.event.id, "test-event");
     assert.equal(response.body.event.name, "Poza Nutą Test");
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
+test("API preserves UTF-8 request body and response data roundtrip", async () => {
+  const api = await startTestApi();
+  const eventName = "Poza Nut\u0105 Test";
+  const singerName = "Micha\u0142";
+
+  try {
+    const eventResponse = await api.request("POST", "/api/events", { id: "utf8-test", name: eventName });
+    const requestResponse = await api.request("POST", "/api/events/utf8-test/requests", {
+      singerName,
+      songSource: "ising",
+      songSourceId: "9053"
+    });
+    const state = await loadQueueState(join(api.config.eventsDir, "utf8-test.json"));
+    const serializedResponses = JSON.stringify([eventResponse.body, requestResponse.body, state]);
+
+    assert.equal(eventResponse.status, 201);
+    assert.equal(eventResponse.headers["content-type"], "application/json; charset=utf-8");
+    assert.equal(eventResponse.body.event.name, eventName);
+    assert.equal(requestResponse.status, 201);
+    assert.equal(requestResponse.headers["content-type"], "application/json; charset=utf-8");
+    assert.equal(requestResponse.body.request.singerName, singerName);
+    assert.equal(state.event.name, eventName);
+    assert.equal(state.requests[0].singerName, singerName);
+    assert.doesNotMatch(serializedResponses, /\uFFFD/);
+    assert.doesNotMatch(serializedResponses, /Poza Nut�/);
+    assert.doesNotMatch(serializedResponses, /Micha�/);
   } finally {
     await cleanupApi(api);
   }
@@ -311,16 +350,17 @@ async function cleanupApi(api: TestApi): Promise<void> {
   await rm(api.tempDir, { recursive: true, force: true });
 }
 
-function requestJson(baseUrl: string, method: string, path: string, body?: unknown, token?: string): Promise<{ status: number; body: any }> {
+function requestJson(baseUrl: string, method: string, path: string, body?: unknown, token?: string): Promise<ApiResponse> {
   return new Promise((resolve, reject) => {
     const url = new URL(path, baseUrl);
     const rawBody = body === undefined ? undefined : JSON.stringify(body);
+    const rawBodyBuffer = rawBody === undefined ? undefined : Buffer.from(rawBody, "utf8");
     const request = httpRequest(
       url,
       {
         method,
         headers: {
-          ...(rawBody ? { "content-type": "application/json", "content-length": Buffer.byteLength(rawBody) } : {}),
+          ...(rawBodyBuffer ? { "content-type": "application/json; charset=utf-8", "content-length": rawBodyBuffer.byteLength } : {}),
           ...(token ? { authorization: `Bearer ${token}` } : {})
         }
       },
@@ -331,6 +371,7 @@ function requestJson(baseUrl: string, method: string, path: string, body?: unkno
           const text = Buffer.concat(chunks).toString("utf8");
           resolve({
             status: response.statusCode ?? 0,
+            headers: response.headers,
             body: text ? JSON.parse(text) : null
           });
         });
@@ -338,8 +379,8 @@ function requestJson(baseUrl: string, method: string, path: string, body?: unkno
     );
 
     request.on("error", reject);
-    if (rawBody) {
-      request.write(rawBody);
+    if (rawBodyBuffer) {
+      request.write(rawBodyBuffer);
     }
     request.end();
   });
