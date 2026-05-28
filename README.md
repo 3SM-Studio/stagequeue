@@ -101,6 +101,8 @@ Uruchomienie:
 pnpm dev:api
 ```
 
+`pnpm dev:api` dziala w watch mode przez natywne `node --watch`, wiec lokalny serwer API restartuje sie po zmianach kodu. Na tym etapie `nodemon` nie jest potrzebny. Jesli natywny watch Node okaze sie niewystarczajacy przy wiekszej strukturze repo, mozna pozniej rozwazyc `nodemon` albo `tsx`.
+
 Domyslnie serwer binduje do `127.0.0.1:4321`. Konfiguracja:
 
 ```env
