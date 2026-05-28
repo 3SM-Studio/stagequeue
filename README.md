@@ -88,3 +88,69 @@ Dodatkowe opcje:
 - `--min-score <number>` ustawia minimalny confidence score, domyslnie `60`.
 - `--pick <number>` wybiera konkretny wynik z top listy, numerowany od `1`.
 - `--dry-run` pokazuje, co zostaloby dodane, ale nie zapisuje zmian do pliku eventu.
+
+## Lokalne API karaoke
+
+API jest lokalnym, dev-first mostem pod przyszly frontend, QR i panel operatora. Dziala wylacznie na lokalnych JSON-ach: `data/imports/ising-songs.json` oraz `data/events/*.json`. API nie odpytuje iSing podczas wyszukiwania ani operacji kolejki.
+
+Uruchomienie:
+
+```bash
+pnpm dev:api
+```
+
+Domyslnie serwer binduje do `127.0.0.1:4321`. Konfiguracja:
+
+```env
+API_HOST=127.0.0.1
+API_PORT=4321
+API_ADMIN_TOKEN=
+```
+
+Jesli `API_ADMIN_TOKEN` jest ustawiony, endpointy operatorskie wymagaja naglowka `Authorization: Bearer <token>`. Publiczne endpointy i endpoint zgloszenia requestu uczestnika nie wymagaja tokena.
+
+Health check:
+
+```bash
+curl http://127.0.0.1:4321/health
+```
+
+Lokalne wyszukiwanie, limitowane i bez zwracania pelnego katalogu:
+
+```bash
+curl "http://127.0.0.1:4321/api/search?q=krolowa%20lez"
+```
+
+Utworzenie eventu:
+
+```bash
+curl -X POST http://127.0.0.1:4321/api/events \
+  -H "Content-Type: application/json" \
+  -d "{\"id\":\"test-event\",\"name\":\"Poza Nutą Test\"}"
+```
+
+Zgloszenie requestu uczestnika po lokalnym `sourceSongId`; tytul, artysta i URL sa brane z lokalnego indeksu, nie z body:
+
+```bash
+curl -X POST http://127.0.0.1:4321/api/events/test-event/requests \
+  -H "Content-Type: application/json" \
+  -d "{\"singerName\":\"Michał\",\"songSource\":\"ising\",\"songSourceId\":\"9053\"}"
+```
+
+Publiczna kolejka:
+
+```bash
+curl http://127.0.0.1:4321/api/events/test-event/public-queue
+curl "http://127.0.0.1:4321/api/events/test-event/public-queue?hideSongTitles=true"
+```
+
+Kolejka operatora i akcje operatorskie:
+
+```bash
+curl http://127.0.0.1:4321/api/events/test-event/operator-queue
+curl -X POST http://127.0.0.1:4321/api/events/test-event/requests/<request-id>/approve
+curl -X POST http://127.0.0.1:4321/api/events/test-event/requests/<request-id>/start
+curl -X POST http://127.0.0.1:4321/api/events/test-event/done
+```
+
+Publiczny frontend, QR i panel operatora sa nastepnym etapem; tutaj jest tylko lokalne API nad istniejacym search i queue core.

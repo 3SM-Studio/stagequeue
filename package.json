@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev:api": "node --experimental-strip-types src/api/server.ts",
     "import:ising": "node --experimental-strip-types src/importers/ising/cli.ts",
     "lint": "node scripts/lint.mjs",
     "queue": "node --experimental-strip-types src/queue/cli.ts",
