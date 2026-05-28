@@ -229,6 +229,8 @@ Adresy lokalne:
 - API: `http://127.0.0.1:4321`
 - Web: `http://127.0.0.1:5173`
 
+Web dev server ma celowo staly port `5173` (`strictPort: true`). Jesli port `5173` jest zajety, zamknij poprzedni proces zamiast pozwalac Vite przejsc na `5174`, bo README, CORS i lokalne linki zakladaja `5173`.
+
 Serwery mozna nadal uruchamiac osobno:
 
 ```bash
