@@ -35,6 +35,22 @@ test("GET /health returns ok", async () => {
   }
 });
 
+test("API responds to local Vite CORS preflight", async () => {
+  const api = await startTestApi();
+  try {
+    const response = await requestJson(api.baseUrl, "OPTIONS", "/api/search", undefined, undefined, {
+      origin: "http://127.0.0.1:5173",
+      "access-control-request-method": "GET"
+    });
+
+    assert.equal(response.status, 204);
+    assert.equal(response.headers["access-control-allow-origin"], "http://127.0.0.1:5173");
+    assert.equal(response.headers["access-control-allow-methods"], "GET,POST,OPTIONS");
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
 test("GET /api/search?q=krolowa finds fixture song", async () => {
   const api = await startTestApi();
   try {
@@ -350,7 +366,7 @@ async function cleanupApi(api: TestApi): Promise<void> {
   await rm(api.tempDir, { recursive: true, force: true });
 }
 
-function requestJson(baseUrl: string, method: string, path: string, body?: unknown, token?: string): Promise<ApiResponse> {
+function requestJson(baseUrl: string, method: string, path: string, body?: unknown, token?: string, extraHeaders: Record<string, string> = {}): Promise<ApiResponse> {
   return new Promise((resolve, reject) => {
     const url = new URL(path, baseUrl);
     const rawBody = body === undefined ? undefined : JSON.stringify(body);
@@ -361,7 +377,8 @@ function requestJson(baseUrl: string, method: string, path: string, body?: unkno
         method,
         headers: {
           ...(rawBodyBuffer ? { "content-type": "application/json; charset=utf-8", "content-length": rawBodyBuffer.byteLength } : {}),
-          ...(token ? { authorization: `Bearer ${token}` } : {})
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...extraHeaders
         }
       },
       (response) => {

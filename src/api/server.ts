@@ -14,6 +14,7 @@ export type ApiConfig = {
   adminToken?: string;
   eventsDir: string;
   songIndexPath: string;
+  allowedOrigins?: string[];
 };
 
 type ApiErrorCode = "bad_request" | "unauthorized" | "not_found" | "conflict" | "missing_song_index" | "internal_error";
@@ -34,7 +35,8 @@ const DEFAULT_CONFIG: ApiConfig = {
   host: "127.0.0.1",
   port: 4321,
   eventsDir: "data/events",
-  songIndexPath: "data/imports/ising-songs.json"
+  songIndexPath: "data/imports/ising-songs.json",
+  allowedOrigins: ["http://127.0.0.1:5173", "http://localhost:5173"]
 };
 
 const MAX_SEARCH_LIMIT = 20;
@@ -62,7 +64,8 @@ export async function loadApiConfig(envPath = ".env"): Promise<ApiConfig> {
     port: parsePort(env.API_PORT, DEFAULT_CONFIG.port),
     adminToken: optionalText(env.API_ADMIN_TOKEN),
     eventsDir: DEFAULT_CONFIG.eventsDir,
-    songIndexPath: DEFAULT_CONFIG.songIndexPath
+    songIndexPath: DEFAULT_CONFIG.songIndexPath,
+    allowedOrigins: DEFAULT_CONFIG.allowedOrigins
   };
 }
 
@@ -70,6 +73,14 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse, 
   const method = request.method ?? "GET";
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${config.host}:${config.port}`}`);
   const pathParts = url.pathname.split("/").filter(Boolean);
+
+  applyCors(request, response, config);
+
+  if (method === "OPTIONS") {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
 
   if (method === "GET" && url.pathname === "/health") {
     sendJson(response, 200, { ok: true });
@@ -357,9 +368,22 @@ function toParticipantRequestResponse(request: SongRequest): Record<string, unkn
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, {
+    ...response.getHeaders(),
     "content-type": "application/json; charset=utf-8"
   });
   response.end(`${JSON.stringify(body)}\n`);
+}
+
+function applyCors(request: IncomingMessage, response: ServerResponse, config: ApiConfig): void {
+  const origin = request.headers.origin;
+  const allowedOrigins = config.allowedOrigins ?? [];
+
+  if (origin && allowedOrigins.includes(origin)) {
+    response.setHeader("access-control-allow-origin", origin);
+    response.setHeader("vary", "Origin");
+    response.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+    response.setHeader("access-control-allow-headers", "Content-Type,Authorization");
+  }
 }
 
 function sendError(response: ServerResponse, error: ApiError): void {

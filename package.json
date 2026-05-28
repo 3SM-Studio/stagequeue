@@ -4,15 +4,28 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:web": "vite build --config apps/web/vite.config.ts",
     "dev:api": "node --experimental-strip-types src/api/server.ts",
+    "dev:web": "vite --config apps/web/vite.config.ts --host 127.0.0.1",
     "import:ising": "node --experimental-strip-types src/importers/ising/cli.ts",
     "lint": "node scripts/lint.mjs",
     "queue": "node --experimental-strip-types src/queue/cli.ts",
     "search:songs": "node --experimental-strip-types src/search/cli.ts",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "typecheck": "node --experimental-strip-types scripts/typecheck.mjs"
+    "typecheck": "node --experimental-strip-types scripts/typecheck.mjs && tsc -p apps/web/tsconfig.json --noEmit"
   },
   "engines": {
     "node": ">=24"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14"
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   }
 }

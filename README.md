@@ -187,3 +187,37 @@ curl -X POST http://127.0.0.1:4321/api/events/test-event/done
 ```
 
 Publiczny frontend, QR i panel operatora sa nastepnym etapem; tutaj jest tylko lokalne API nad istniejacym search i queue core.
+
+## Frontend MVP
+
+Frontend MVP jest cienkim klientem React/Vite do lokalnego API. Nie odpytuje iSing i nie zawiera jeszcze QR, logowania, AI ani finalnego designu.
+
+Flow lokalny:
+
+```bash
+pnpm import:ising
+pnpm dev:api
+pnpm dev:web
+```
+
+Utworz event:
+
+```bash
+curl -X POST http://127.0.0.1:4321/api/events \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d "{\"id\":\"test-event\",\"name\":\"Poza Nutą Test\"}"
+```
+
+Adresy widokow:
+
+- participant: `http://127.0.0.1:5173/event/test-event`
+- public queue: `http://127.0.0.1:5173/event/test-event/public`
+- operator: `http://127.0.0.1:5173/event/test-event/operator`
+
+Konfiguracja frontendu:
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:4321
+```
+
+Participant view pozwala wpisac imie, wyszukac piosenke w lokalnym indeksie i wyslac pending request. Operator view pokazuje pending/approved/now/history i pozwala approve, reject, start, skip oraz done. Public view pokazuje Now, Next i Upcoming z pollingiem.
