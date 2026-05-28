@@ -49,3 +49,20 @@ pnpm search:songs "krolowa lez"
 ```
 
 Wyszukiwarka czyta tylko `data/imports/ising-songs.json` i nie odpytuje iSing API. Pelny katalog importu nie powinien byc commitowany; pliki `data/imports/*.json` sa ignorowane przez git.
+
+## Lokalna kolejka karaoke
+
+To jest lokalny silnik kolejki bez UI, QR i endpointow HTTP. Dane eventow sa runtime i nie powinny byc commitowane; pliki `data/events/*.json` sa ignorowane przez git.
+
+Przykladowy flow:
+
+```bash
+pnpm queue create --id test-event --name "Poza Nutą Test"
+pnpm queue add --event test-event --singer "Michał" --title "Królowa Łez" --artist "Agnieszka Chylińska" --source ising --source-id 9053 --url "https://ising.pl/agnieszka-chylinska-krolowa-lez-piosenka"
+pnpm queue approve --event test-event --request <request-id>
+pnpm queue start --event test-event --request <request-id>
+pnpm queue done --event test-event
+pnpm queue public --event test-event
+```
+
+Kolejka dziala wylacznie na lokalnym JSON `data/events/<event-id>.json` i nie odpytuje iSing API podczas operacji kolejki.
