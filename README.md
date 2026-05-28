@@ -33,3 +33,19 @@ Ograniczenia:
 - nie wolno wystawiac pelnej kopii katalogu iSing publicznie,
 - importer dziala tylko jako okresowy lokalny import metadanych i nie wolno uzywac go ani iSing API jako live proxy dla wyszukiwan uzytkownikow,
 - po publikacji oficjalnego publicznego API iSing adapter nalezy wymienic na oficjalna integracje.
+
+## Lokalne wyszukiwanie piosenek
+
+Najpierw zbuduj lokalny indeks:
+
+```bash
+pnpm import:ising
+```
+
+Potem wyszukuj po lokalnie zaimportowanych metadanych:
+
+```bash
+pnpm search:songs "krolowa lez"
+```
+
+Wyszukiwarka czyta tylko `data/imports/ising-songs.json` i nie odpytuje iSing API. Pelny katalog importu nie powinien byc commitowany; pliki `data/imports/*.json` sa ignorowane przez git.

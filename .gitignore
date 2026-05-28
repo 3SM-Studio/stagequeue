@@ -1,3 +1,4 @@
 node_modules/
 .env
-data/imports/
+data/imports/*.json
+data_old/
