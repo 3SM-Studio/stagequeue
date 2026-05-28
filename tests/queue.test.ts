@@ -102,14 +102,42 @@ test("getPublicQueue hides pending requests", () => {
   const approved = approveRequest(pending, pending.requests[0].id);
   const publicQueue = getPublicQueue(approved);
 
-  assert.equal(publicQueue.upcoming.length, 1);
-  assert.equal(publicQueue.upcoming[0].displayName, "Michał");
+  assert.equal(publicQueue.next?.displayName, "Michał");
+  assert.equal(publicQueue.upcoming.length, 0);
 });
 
-test("getPublicQueue can hide song titles", () => {
+test("getPublicQueue uses next for the first approved request and leaves upcoming empty for one approved request", () => {
+  const pending = addThreeRequests();
+  const approved = approveRequest(pending, pending.requests[0].id);
+  const publicQueue = getPublicQueue(approved);
+
+  assert.equal(publicQueue.next?.position, 1);
+  assert.equal(publicQueue.next?.displayName, "Michał");
+  assert.deepEqual(publicQueue.upcoming, []);
+});
+
+test("getPublicQueue puts approved requests after next into upcoming", () => {
+  const state = approveAll(addThreeRequests());
+  const publicQueue = getPublicQueue(state);
+
+  assert.equal(publicQueue.next?.position, 1);
+  assert.equal(publicQueue.next?.displayName, "Michał");
+  assert.deepEqual(
+    publicQueue.upcoming.map((item) => item.position),
+    [2, 3]
+  );
+  assert.deepEqual(
+    publicQueue.upcoming.map((item) => item.displayName),
+    ["Kasia", "Ola"]
+  );
+});
+
+test("getPublicQueue can hide song titles for next and upcoming", () => {
   const state = approveAll(addThreeRequests());
   const publicQueue = getPublicQueue(state, { hideSongTitles: true });
 
+  assert.equal(publicQueue.next?.songTitle, undefined);
+  assert.equal(publicQueue.next?.songArtist, undefined);
   assert.equal(publicQueue.upcoming[0].songTitle, undefined);
   assert.equal(publicQueue.upcoming[0].songArtist, undefined);
 });

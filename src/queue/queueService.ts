@@ -177,11 +177,12 @@ export function moveRequest(state: QueueState, requestId: string, newPosition: n
 export function getPublicQueue(state: QueueState, options: PublicQueueOptions = {}): PublicQueue {
   const now = state.requests.find((request) => request.status === "now");
   const approved = getApprovedRequests(state);
-  const upcoming = approved.map((request) => toPublicItem(request, options));
+  const next = approved[0] ? toPublicItem(approved[0], options) : undefined;
+  const upcoming = approved.slice(1).map((request) => toPublicItem(request, options));
 
   return {
     now: now ? toPublicItem(now, options) : undefined,
-    next: upcoming[0],
+    next,
     upcoming
   };
 }
