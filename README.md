@@ -219,6 +219,19 @@ Flow lokalny:
 
 ```bash
 pnpm import:ising
+pnpm dev
+```
+
+`pnpm dev` uruchamia API i web rownolegle w jednym terminalu przez `concurrently`. Logi sa prefiksowane jako `API` i `WEB`, a zatrzymanie procesu konczy oba serwery. `concurrently` sluzy tylko do lokalnego dev workflow.
+
+Adresy lokalne:
+
+- API: `http://127.0.0.1:4321`
+- Web: `http://127.0.0.1:5173`
+
+Serwery mozna nadal uruchamiac osobno:
+
+```bash
 pnpm dev:api
 pnpm dev:web
 ```
