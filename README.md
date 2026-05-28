@@ -68,3 +68,23 @@ pnpm queue public --event test-event
 Kolejka dziala wylacznie na lokalnym JSON `data/events/<event-id>.json` i nie odpytuje iSing API podczas operacji kolejki.
 
 Publiczny widok kolejki pokazuje aktualnie spiewajaca osobe jako `Now`, pierwsza zaakceptowana osobe jako `Next`, a `Upcoming` zawiera dopiero kolejne zaakceptowane requesty po `Next`.
+
+## Dodawanie requestu z wyszukiwarki
+
+Mozesz dodac request do kolejki bez recznego przepisywania tytulu, artysty, source id i URL-a. Komenda korzysta wylacznie z lokalnego indeksu `data/imports/ising-songs.json` i nie odpytuje iSing API.
+
+Przykladowy flow:
+
+```bash
+pnpm import:ising
+pnpm queue create --id test-event --name "Poza Nutą Test"
+pnpm queue add-from-search --event test-event --singer "Michał" --query "krolowa lez"
+pnpm queue approve --event test-event --request <id>
+pnpm queue public --event test-event
+```
+
+Dodatkowe opcje:
+
+- `--min-score <number>` ustawia minimalny confidence score, domyslnie `60`.
+- `--pick <number>` wybiera konkretny wynik z top listy, numerowany od `1`.
+- `--dry-run` pokazuje, co zostaloby dodane, ale nie zapisuje zmian do pliku eventu.

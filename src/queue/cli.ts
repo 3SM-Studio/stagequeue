@@ -1,11 +1,16 @@
 import { pathToFileURL } from "node:url";
 import { addRequest, approveRequest, completeCurrentRequest, createEvent, getOperatorQueue, getPublicQueue, moveRequest, QueueOperationError, rejectRequest, skipRequest, startRequest } from "./queueService.ts";
 import { loadQueueState, MissingQueueStateError, saveQueueState } from "./localQueueStore.ts";
+import { MissingLocalSongIndexError, readLocalSongIndex } from "../search/localSongIndex.ts";
+import { searchSongs, type SearchResult } from "../search/songSearch.ts";
 import type { QueueState, SongRequest } from "./types.ts";
+import type { LocalSong } from "../importers/ising/types.ts";
 
 type CliIO = {
   stdout?: (message: string) => void;
   stderr?: (message: string) => void;
+  eventsDir?: string;
+  songIndexPath?: string;
 };
 
 type ParsedArgs = {
@@ -14,10 +19,13 @@ type ParsedArgs = {
 };
 
 const DEFAULT_EVENTS_DIR = "data/events";
+const DEFAULT_SONG_INDEX_PATH = "data/imports/ising-songs.json";
 
 export async function runQueueCli(args: string[], io: CliIO = {}): Promise<number> {
   const stdout = io.stdout ?? console.log;
   const stderr = io.stderr ?? console.error;
+  const eventsDir = io.eventsDir ?? DEFAULT_EVENTS_DIR;
+  const songIndexPath = io.songIndexPath ?? DEFAULT_SONG_INDEX_PATH;
   const parsed = parseArgs(args);
 
   try {
@@ -28,9 +36,9 @@ export async function runQueueCli(args: string[], io: CliIO = {}): Promise<numbe
 
     switch (parsed.command) {
       case "create":
-        return await createCommand(parsed, stdout);
+        return await createCommand(parsed, stdout, eventsDir);
       case "add":
-        return await updateCommand(parsed, stdout, (state) =>
+        return await updateCommand(parsed, stdout, eventsDir, (state) =>
           addRequest(state, {
             singerName: requiredFlag(parsed, "singer"),
             displayName: optionalFlag(parsed, "display-name"),
@@ -42,22 +50,24 @@ export async function runQueueCli(args: string[], io: CliIO = {}): Promise<numbe
             note: optionalFlag(parsed, "note")
           })
         );
+      case "add-from-search":
+        return await addFromSearchCommand(parsed, stdout, stderr, eventsDir, songIndexPath);
       case "approve":
-        return await updateCommand(parsed, stdout, (state) => approveRequest(state, requiredFlag(parsed, "request")));
+        return await updateCommand(parsed, stdout, eventsDir, (state) => approveRequest(state, requiredFlag(parsed, "request")));
       case "reject":
-        return await updateCommand(parsed, stdout, (state) => rejectRequest(state, requiredFlag(parsed, "request")));
+        return await updateCommand(parsed, stdout, eventsDir, (state) => rejectRequest(state, requiredFlag(parsed, "request")));
       case "start":
-        return await updateCommand(parsed, stdout, (state) => startRequest(state, requiredFlag(parsed, "request")));
+        return await updateCommand(parsed, stdout, eventsDir, (state) => startRequest(state, requiredFlag(parsed, "request")));
       case "done":
-        return await updateCommand(parsed, stdout, completeCurrentRequest);
+        return await updateCommand(parsed, stdout, eventsDir, completeCurrentRequest);
       case "skip":
-        return await updateCommand(parsed, stdout, (state) => skipRequest(state, requiredFlag(parsed, "request")));
+        return await updateCommand(parsed, stdout, eventsDir, (state) => skipRequest(state, requiredFlag(parsed, "request")));
       case "move":
-        return await updateCommand(parsed, stdout, (state) => moveRequest(state, requiredFlag(parsed, "request"), Number(requiredFlag(parsed, "position"))));
+        return await updateCommand(parsed, stdout, eventsDir, (state) => moveRequest(state, requiredFlag(parsed, "request"), Number(requiredFlag(parsed, "position"))));
       case "show":
-        return await showCommand(parsed, stdout);
+        return await showCommand(parsed, stdout, eventsDir);
       case "public":
-        return await publicCommand(parsed, stdout);
+        return await publicCommand(parsed, stdout, eventsDir);
       default:
         stderr(`Unknown queue command: ${parsed.command}`);
         stderr("Run: pnpm queue --help");
@@ -80,7 +90,7 @@ export async function runQueueCli(args: string[], io: CliIO = {}): Promise<numbe
   }
 }
 
-async function createCommand(parsed: ParsedArgs, stdout: (message: string) => void): Promise<number> {
+async function createCommand(parsed: ParsedArgs, stdout: (message: string) => void, eventsDir: string): Promise<number> {
   const eventId = parseEventId(requiredFlag(parsed, "id"));
   const state = createEvent({
     id: eventId,
@@ -90,17 +100,17 @@ async function createCommand(parsed: ParsedArgs, stdout: (message: string) => vo
     status: "active"
   });
 
-  await saveQueueState(eventPath(eventId), state);
+  await saveQueueState(eventPath(eventId, eventsDir), state);
   stdout(`Queue event created: ${eventId}`);
-  stdout(`File: ${eventPath(eventId)}`);
+  stdout(`File: ${eventPath(eventId, eventsDir)}`);
   return 0;
 }
 
-async function updateCommand(parsed: ParsedArgs, stdout: (message: string) => void, operation: (state: QueueState) => QueueState): Promise<number> {
+async function updateCommand(parsed: ParsedArgs, stdout: (message: string) => void, eventsDir: string, operation: (state: QueueState) => QueueState): Promise<number> {
   const eventId = parseEventId(requiredFlag(parsed, "event"));
-  const before = await loadQueueState(eventPath(eventId));
+  const before = await loadQueueState(eventPath(eventId, eventsDir));
   const after = operation(before);
-  await saveQueueState(eventPath(eventId), after);
+  await saveQueueState(eventPath(eventId, eventsDir), after);
   stdout(`Queue event updated: ${eventId}`);
 
   const newestRequest = findNewestRequest(before, after);
@@ -111,9 +121,86 @@ async function updateCommand(parsed: ParsedArgs, stdout: (message: string) => vo
   return 0;
 }
 
-async function showCommand(parsed: ParsedArgs, stdout: (message: string) => void): Promise<number> {
+async function addFromSearchCommand(parsed: ParsedArgs, stdout: (message: string) => void, stderr: (message: string) => void, eventsDir: string, songIndexPath: string): Promise<number> {
   const eventId = parseEventId(requiredFlag(parsed, "event"));
-  const state = await loadQueueState(eventPath(eventId));
+  const singerName = requiredFlag(parsed, "singer");
+  const query = requiredFlag(parsed, "query");
+  const minScore = parseMinScore(optionalFlag(parsed, "min-score"));
+  const pick = parsePick(optionalFlag(parsed, "pick"));
+  const dryRun = parsed.flags.has("dry-run");
+  let state: QueueState;
+  let songs: LocalSong[];
+
+  try {
+    state = await loadQueueState(eventPath(eventId, eventsDir));
+  } catch (error) {
+    if (error instanceof MissingQueueStateError) {
+      stderr(`Missing queue event: ${eventId}`);
+      stderr(`Run: pnpm queue create --id ${eventId} --name "..."`);
+      return 1;
+    }
+    throw error;
+  }
+
+  try {
+    songs = await readLocalSongIndex(songIndexPath);
+  } catch (error) {
+    if (error instanceof MissingLocalSongIndexError) {
+      stderr(`Missing local song index: ${error.path}`);
+      stderr("Run: pnpm import:ising");
+      return 1;
+    }
+    throw error;
+  }
+
+  const results = searchSongs(query, songs, { limit: 5, source: "all" });
+  const selected = selectSearchResult(results, pick, minScore);
+
+  if (!selected.ok) {
+    stderr(selected.message);
+    if (selected.bestScore !== undefined) {
+      stderr(`Best score: ${selected.bestScore}`);
+    }
+    stderr("Try a different query, use --pick, lower --min-score, or add manually.");
+    printSearchResults(stderr, results);
+    return 1;
+  }
+
+  const song = selected.result.song;
+  const nextState = addRequest(state, {
+    singerName,
+    displayName: singerName,
+    songSource: songSourceFromLocalSong(song),
+    songSourceId: song.sourceSongId,
+    songTitle: song.title,
+    songArtist: song.artist,
+    songUrl: song.sourceUrl ?? undefined
+  });
+  const addedRequest = findNewestRequest(state, nextState);
+
+  if (dryRun) {
+    stdout("Dry run:");
+    stdout("Would add pending request:");
+    stdout(`Singer: ${singerName}`);
+    stdout(`Song: ${song.artist} - ${song.title}`);
+    stdout(`Source: ${formatSource(song.source)}`);
+    stdout("Status: pending");
+    return 0;
+  }
+
+  await saveQueueState(eventPath(eventId, eventsDir), nextState);
+  stdout("Added pending request:");
+  stdout(`ID: ${addedRequest?.id ?? "unknown"}`);
+  stdout(`Singer: ${singerName}`);
+  stdout(`Song: ${song.artist} - ${song.title}`);
+  stdout(`Source: ${formatSource(song.source)}`);
+  stdout("Status: pending");
+  return 0;
+}
+
+async function showCommand(parsed: ParsedArgs, stdout: (message: string) => void, eventsDir: string): Promise<number> {
+  const eventId = parseEventId(requiredFlag(parsed, "event"));
+  const state = await loadQueueState(eventPath(eventId, eventsDir));
   const queue = getOperatorQueue(state);
 
   stdout(`${state.event.name} (${state.event.status})`);
@@ -126,9 +213,9 @@ async function showCommand(parsed: ParsedArgs, stdout: (message: string) => void
   return 0;
 }
 
-async function publicCommand(parsed: ParsedArgs, stdout: (message: string) => void): Promise<number> {
+async function publicCommand(parsed: ParsedArgs, stdout: (message: string) => void, eventsDir: string): Promise<number> {
   const eventId = parseEventId(requiredFlag(parsed, "event"));
-  const state = await loadQueueState(eventPath(eventId));
+  const state = await loadQueueState(eventPath(eventId, eventsDir));
   const queue = getPublicQueue(state, { hideSongTitles: parsed.flags.has("hide-song-titles") });
 
   stdout(`Public queue: ${state.event.name}`);
@@ -175,6 +262,45 @@ function findNewestRequest(before: QueueState, after: QueueState): SongRequest |
   return after.requests.find((request) => !beforeIds.has(request.id));
 }
 
+function selectSearchResult(results: SearchResult[], pick: number | undefined, minScore: number): { ok: true; result: SearchResult } | { ok: false; message: string; bestScore?: number } {
+  if (pick !== undefined) {
+    const result = results[pick - 1];
+    if (!result) {
+      return {
+        ok: false,
+        message: `Pick is outside the result range: ${pick}`,
+        bestScore: results[0]?.score
+      };
+    }
+
+    return { ok: true, result };
+  }
+
+  const best = results[0];
+  if (!best || best.score < minScore) {
+    return {
+      ok: false,
+      message: "No confident match found.",
+      bestScore: best?.score ?? 0
+    };
+  }
+
+  return { ok: true, result: best };
+}
+
+function printSearchResults(output: (message: string) => void, results: SearchResult[]): void {
+  output("Top local matches:");
+
+  if (results.length === 0) {
+    output("  none");
+    return;
+  }
+
+  for (const [index, result] of results.entries()) {
+    output(`  ${index + 1}. ${result.song.artist} - ${result.song.title} (score: ${result.score})`);
+  }
+}
+
 function parseArgs(args: string[]): ParsedArgs {
   const flags = new Map<string, string | boolean>();
   let command = "";
@@ -218,6 +344,32 @@ function optionalFlag(parsed: ParsedArgs, name: string): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function parseMinScore(value: string | undefined): number {
+  if (value === undefined) {
+    return 60;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new QueueOperationError(`Invalid --min-score: ${value}`);
+  }
+
+  return parsed;
+}
+
+function parsePick(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new QueueOperationError(`Invalid --pick: ${value}`);
+  }
+
+  return parsed;
+}
+
 function parseEventId(value: string): string {
   if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
     throw new QueueOperationError("Event id can only contain letters, numbers, underscores and hyphens");
@@ -234,8 +386,16 @@ function parseSongSource(value: string): SongRequest["songSource"] {
   throw new QueueOperationError("Song source must be one of: ising, karafun, manual");
 }
 
-function eventPath(eventId: string): string {
-  return `${DEFAULT_EVENTS_DIR}/${eventId}.json`;
+function songSourceFromLocalSong(song: LocalSong): SongRequest["songSource"] {
+  return song.source === "ising" || song.source === "karafun" ? song.source : "manual";
+}
+
+function formatSource(source: string): string {
+  return source === "ising" ? "iSing" : source;
+}
+
+function eventPath(eventId: string, eventsDir = DEFAULT_EVENTS_DIR): string {
+  return `${eventsDir}/${eventId}.json`;
 }
 
 function helpText(): string {
@@ -245,6 +405,7 @@ function helpText(): string {
     "Commands:",
     "  create --id <event-id> --name <name> [--venue <venue>] [--date <date>]",
     "  add --event <event-id> --singer <name> --title <title> --artist <artist> --source <ising|karafun|manual> [--source-id <id>] [--url <url>] [--note <note>]",
+    "  add-from-search --event <event-id> --singer <name> --query <query> [--min-score <number>] [--pick <number>] [--dry-run]",
     "  approve --event <event-id> --request <request-id>",
     "  reject --event <event-id> --request <request-id>",
     "  start --event <event-id> --request <request-id>",
