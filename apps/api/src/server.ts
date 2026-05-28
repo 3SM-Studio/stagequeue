@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { addRequest, approveRequest, completeCurrentRequest, createEvent, getOperatorQueue, getPublicQueue, QueueOperationError, rejectRequest, skipRequest, startRequest } from "../../../src/queue/queueService.ts";
@@ -15,9 +16,25 @@ export type ApiConfig = {
   eventsDir: string;
   songIndexPath: string;
   allowedOrigins?: string[];
+  logLevel: ApiLogLevel;
+  logger: ApiLogger;
 };
 
 type ApiErrorCode = "bad_request" | "unauthorized" | "not_found" | "conflict" | "missing_song_index" | "internal_error";
+export type ApiLogLevel = "silent" | "info" | "debug";
+
+export type ApiLogger = {
+  log: (message: string) => void;
+  error: (message: string) => void;
+};
+
+type RequestContext = {
+  requestId: string;
+  method: string;
+  pathname: string;
+  startedAt: number;
+  config: ApiConfig;
+};
 
 class ApiError extends Error {
   readonly status: number;
@@ -36,7 +53,9 @@ const DEFAULT_CONFIG: ApiConfig = {
   port: 4321,
   eventsDir: "data/events",
   songIndexPath: "data/imports/ising-songs.json",
-  allowedOrigins: ["http://127.0.0.1:5173", "http://localhost:5173"]
+  allowedOrigins: ["http://127.0.0.1:5173", "http://localhost:5173"],
+  logLevel: "info",
+  logger: console
 };
 
 const MAX_SEARCH_LIMIT = 20;
@@ -48,10 +67,18 @@ export function createApiServer(config: Partial<ApiConfig> = {}): Server {
   };
 
   return createServer(async (request, response) => {
+    const context = createRequestContext(request, resolvedConfig);
+    response.setHeader("X-Request-Id", context.requestId);
+    response.on("finish", () => {
+      logAccess(context, response.statusCode);
+    });
+
     try {
       await routeRequest(request, response, resolvedConfig);
     } catch (error) {
-      sendError(response, toApiError(error));
+      const apiError = toApiError(error);
+      logRequestError(context, apiError);
+      sendError(response, apiError);
     }
   });
 }
@@ -65,7 +92,9 @@ export async function loadApiConfig(envPath = ".env"): Promise<ApiConfig> {
     adminToken: optionalText(env.API_ADMIN_TOKEN),
     eventsDir: DEFAULT_CONFIG.eventsDir,
     songIndexPath: DEFAULT_CONFIG.songIndexPath,
-    allowedOrigins: DEFAULT_CONFIG.allowedOrigins
+    allowedOrigins: DEFAULT_CONFIG.allowedOrigins,
+    logLevel: parseLogLevel(env.API_LOG_LEVEL),
+    logger: DEFAULT_CONFIG.logger
   };
 }
 
@@ -374,6 +403,36 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(`${JSON.stringify(body)}\n`);
 }
 
+function createRequestContext(request: IncomingMessage, config: ApiConfig): RequestContext {
+  const method = request.method ?? "GET";
+  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${config.host}:${config.port}`}`);
+
+  return {
+    requestId: randomUUID(),
+    method,
+    pathname: url.pathname,
+    startedAt: Date.now(),
+    config
+  };
+}
+
+function logAccess(context: RequestContext, status: number): void {
+  if (context.config.logLevel === "silent") {
+    return;
+  }
+
+  const durationMs = Date.now() - context.startedAt;
+  context.config.logger.log(`[api] ${context.requestId} ${context.method} ${context.pathname} ${status} ${durationMs}ms`);
+}
+
+function logRequestError(context: RequestContext, error: ApiError): void {
+  if (context.config.logLevel === "silent") {
+    return;
+  }
+
+  context.config.logger.error(`[api:error] ${context.requestId} ${context.method} ${context.pathname} ${error.status} ${error.message}`);
+}
+
 function applyCors(request: IncomingMessage, response: ServerResponse, config: ApiConfig): void {
   const origin = request.headers.origin;
   const allowedOrigins = config.allowedOrigins ?? [];
@@ -438,6 +497,14 @@ function parsePort(value: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 && parsed <= 65535 ? parsed : fallback;
 }
 
+function parseLogLevel(value: string | undefined): ApiLogLevel {
+  if (value === "silent" || value === "info" || value === "debug") {
+    return value;
+  }
+
+  return DEFAULT_CONFIG.logLevel;
+}
+
 function optionalText(value: string | undefined): string | undefined {
   return value && value.trim() ? value.trim() : undefined;
 }
@@ -449,7 +516,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = await loadApiConfig();
   const server = createApiServer(config);
-  server.listen(config.port, config.host, () => {
-    console.log(`Karaoke API listening at http://${config.host}:${config.port}`);
+  server.on("error", (error) => {
+    handleServerError(error, config);
   });
+  server.listen(config.port, config.host, () => {
+    if (config.logLevel !== "silent") {
+      config.logger.log(`[api] listening on http://${config.host}:${config.port}`);
+      if (config.adminToken) {
+        config.logger.log("[api] admin token enabled");
+      }
+    }
+  });
+}
+
+function handleServerError(error: unknown, config: ApiConfig): void {
+  const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+
+  if (code === "EADDRINUSE") {
+    config.logger.error(`[api:error] Port ${config.port} is already in use on ${config.host}.`);
+    config.logger.error("[api:error] Stop the previous API process or set a different API_PORT.");
+    process.exit(1);
+    return;
+  }
+
+  const message = error instanceof Error ? error.message : "Unknown API server error";
+  config.logger.error(`[api:error] Failed to start API server: ${message}`);
+  process.exit(1);
 }

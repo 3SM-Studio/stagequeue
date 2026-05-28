@@ -12,6 +12,8 @@ type TestApi = {
   baseUrl: string;
   config: ApiConfig;
   tempDir: string;
+  logs: string[];
+  errors: string[];
   request: (method: string, path: string, body?: unknown, token?: string) => Promise<ApiResponse>;
   close: () => Promise<void>;
 };
@@ -29,7 +31,78 @@ test("GET /health returns ok", async () => {
 
     assert.equal(response.status, 200);
     assert.equal(response.headers["content-type"], "application/json; charset=utf-8");
+    assert.match(String(response.headers["x-request-id"]), /^[0-9a-f-]{36}$/);
     assert.deepEqual(response.body, { ok: true });
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
+test("API logs access requests when API_LOG_LEVEL is info", async () => {
+  const api = await startTestApi({ logLevel: "info" });
+  try {
+    const response = await api.request("GET", "/api/search?q=krolowa&limit=10");
+
+    assert.equal(response.status, 200);
+    assert.equal(api.logs.length, 1);
+    assert.match(api.logs[0], /^\[api\] [0-9a-f-]{36} GET \/api\/search 200 \d+ms$/);
+    assert.doesNotMatch(api.logs[0], /q=krolowa/);
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
+test("API does not log access requests when API_LOG_LEVEL is silent", async () => {
+  const api = await startTestApi({ logLevel: "silent" });
+  try {
+    const response = await api.request("GET", "/health");
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(api.logs, []);
+    assert.deepEqual(api.errors, []);
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
+test("API logs do not include Authorization header or token values", async () => {
+  const api = await startTestApi({ adminToken: "secret-token", logLevel: "info" });
+  try {
+    const response = await api.request("GET", "/api/events/test-event/operator-queue", undefined, "secret-token");
+    const joinedLogs = [...api.logs, ...api.errors].join("\n");
+
+    assert.equal(response.status, 404);
+    assert.doesNotMatch(joinedLogs, /Authorization/i);
+    assert.doesNotMatch(joinedLogs, /secret-token/);
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
+test("API error responses do not include stack traces", async () => {
+  const api = await startTestApi();
+  try {
+    const response = await api.request("GET", "/api/events/bad!/public-queue");
+    const serializedBody = JSON.stringify(response.body);
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error, "bad_request");
+    assert.doesNotMatch(serializedBody, /stack/i);
+    assert.doesNotMatch(serializedBody, /at /);
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
+test("API error logs include requestId, method, path, status and message", async () => {
+  const api = await startTestApi({ logLevel: "info" });
+  try {
+    const response = await api.request("GET", "/api/events/bad!/public-queue");
+    const requestId = String(response.headers["x-request-id"]);
+
+    assert.equal(response.status, 400);
+    assert.equal(api.errors.length, 1);
+    assert.match(api.errors[0], new RegExp(`^\\[api:error\\] ${requestId} GET /api/events/bad!/public-queue 400 Invalid event id$`));
   } finally {
     await cleanupApi(api);
   }
@@ -323,16 +396,23 @@ async function createEventAndPendingRequest(api: TestApi): Promise<string> {
   return requestResponse.body.request.id;
 }
 
-async function startTestApi(options: { writeSongIndex?: boolean; songs?: LocalSong[]; adminToken?: string } = {}): Promise<TestApi> {
+async function startTestApi(options: { writeSongIndex?: boolean; songs?: LocalSong[]; adminToken?: string; logLevel?: ApiConfig["logLevel"] } = {}): Promise<TestApi> {
   const tempDir = await mkdtemp(join(tmpdir(), "api-test-"));
   const eventsDir = join(tempDir, "events");
   const songIndexPath = join(tempDir, "ising-songs.json");
+  const logs: string[] = [];
+  const errors: string[] = [];
   const config: ApiConfig = {
     host: "127.0.0.1",
     port: 0,
     eventsDir,
     songIndexPath,
-    adminToken: options.adminToken
+    adminToken: options.adminToken,
+    logLevel: options.logLevel ?? "silent",
+    logger: {
+      log: (message) => logs.push(message),
+      error: (message) => errors.push(message)
+    }
   };
 
   if (options.writeSongIndex !== false) {
@@ -353,6 +433,8 @@ async function startTestApi(options: { writeSongIndex?: boolean; songs?: LocalSo
     baseUrl,
     config,
     tempDir,
+    logs,
+    errors,
     request: (method, path, body, token) => requestJson(baseUrl, method, path, body, token),
     close: () =>
       new Promise<void>((resolve, reject) => {

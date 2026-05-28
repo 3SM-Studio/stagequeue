@@ -103,12 +103,31 @@ pnpm dev:api
 
 `pnpm dev:api` dziala w watch mode przez natywne `node --watch`, wiec lokalny serwer API restartuje sie po zmianach kodu. Na tym etapie `nodemon` nie jest potrzebny. Jesli natywny watch Node okaze sie niewystarczajacy przy wiekszej strukturze repo, mozna pozniej rozwazyc `nodemon` albo `tsx`.
 
+API loguje lokalnie requesty w formacie `[api] <requestId> <method> <path> <status> <durationMs>ms`. Kazda odpowiedz ma header `X-Request-Id`, co pomaga powiazac blad z frontendu z logiem backendu. Domyslnie `API_LOG_LEVEL=info`; ustaw `API_LOG_LEVEL=silent`, jesli chcesz wyciszyc access logi. Logi nie powinny zawierac pelnych body requestow, tokenow ani naglowka `Authorization`.
+
 Domyslnie serwer binduje do `127.0.0.1:4321`. Konfiguracja:
 
 ```env
 API_HOST=127.0.0.1
 API_PORT=4321
 API_ADMIN_TOKEN=
+API_LOG_LEVEL=info
+```
+
+Jesli port `4321` jest zajety, zamknij poprzedni proces API albo ustaw inny `API_PORT`.
+
+Git Bash/CMD:
+
+```bash
+netstat -ano | findstr :4321
+cmd.exe /c "taskkill /PID <PID> /F"
+```
+
+PowerShell:
+
+```powershell
+Get-NetTCPConnection -LocalPort 4321
+Stop-Process -Id <PID> -Force
 ```
 
 Jesli `API_ADMIN_TOKEN` jest ustawiony, endpointy operatorskie wymagaja naglowka `Authorization: Bearer <token>`. Publiczne endpointy i endpoint zgloszenia requestu uczestnika nie wymagaja tokena.
