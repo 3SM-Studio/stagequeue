@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createApiServer, type ApiConfig } from "../src/api/server.ts";
+import { createApiServer, type ApiConfig } from "../apps/api/src/server.ts";
 import { loadQueueState } from "../src/queue/localQueueStore.ts";
 import type { LocalSong } from "../src/importers/ising/types.ts";
 

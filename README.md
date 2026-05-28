@@ -93,6 +93,8 @@ Dodatkowe opcje:
 
 API jest lokalnym, dev-first mostem pod przyszly frontend, QR i panel operatora. Dziala wylacznie na lokalnych JSON-ach: `data/imports/ising-songs.json` oraz `data/events/*.json`. API nie odpytuje iSing podczas wyszukiwania ani operacji kolejki.
 
+Aplikacja API znajduje sie w `apps/api`. Domain/core pozostaje tymczasowo w rootowym `src` (`src/queue`, `src/search`, `src/importers`) jako etap przejsciowy przed ewentualnym wydzieleniem `packages/domain` i `packages/shared`.
+
 Uruchomienie:
 
 ```bash

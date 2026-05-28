@@ -1,12 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { addRequest, approveRequest, completeCurrentRequest, createEvent, getOperatorQueue, getPublicQueue, QueueOperationError, rejectRequest, skipRequest, startRequest } from "../queue/queueService.ts";
-import { loadQueueState, MissingQueueStateError, saveQueueState } from "../queue/localQueueStore.ts";
-import { MissingLocalSongIndexError, readLocalSongIndex } from "../search/localSongIndex.ts";
-import { searchSongs } from "../search/songSearch.ts";
-import type { LocalSong } from "../importers/ising/types.ts";
-import type { QueueState, SongRequest } from "../queue/types.ts";
+import { addRequest, approveRequest, completeCurrentRequest, createEvent, getOperatorQueue, getPublicQueue, QueueOperationError, rejectRequest, skipRequest, startRequest } from "../../../src/queue/queueService.ts";
+import { loadQueueState, MissingQueueStateError, saveQueueState } from "../../../src/queue/localQueueStore.ts";
+import { MissingLocalSongIndexError, readLocalSongIndex } from "../../../src/search/localSongIndex.ts";
+import { searchSongs } from "../../../src/search/songSearch.ts";
+import type { LocalSong } from "../../../src/importers/ising/types.ts";
+import type { QueueState, SongRequest } from "../../../src/queue/types.ts";
 
 export type ApiConfig = {
   host: string;
