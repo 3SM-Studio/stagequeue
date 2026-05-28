@@ -4,6 +4,9 @@ import { join } from "node:path";
 const files = [
   ...(await listFiles("src", ".ts")),
   ...(await listFiles("tests", ".ts")),
+  ...(await listFiles("apps", ".ts")),
+  ...(await listFiles("apps", ".tsx")),
+  ...(await listFiles("apps", ".css")),
   ...(await listFiles("docs", ".md")),
   "README.md",
   ".env.example"
