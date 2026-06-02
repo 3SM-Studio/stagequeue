@@ -126,11 +126,14 @@ function levenshteinDistance(a: string, b: string, maxDistance: number): number 
 
   for (let i = 1; i <= a.length; i += 1) {
     const current = [i];
-    let rowMin = current[0];
+    let rowMin = current[0] ?? i;
 
     for (let j = 1; j <= b.length; j += 1) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      const value = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
+      const deletion = (previous[j] ?? Number.POSITIVE_INFINITY) + 1;
+      const insertion = (current[j - 1] ?? Number.POSITIVE_INFINITY) + 1;
+      const substitution = (previous[j - 1] ?? Number.POSITIVE_INFINITY) + cost;
+      const value = Math.min(deletion, insertion, substitution);
       current[j] = value;
       rowMin = Math.min(rowMin, value);
     }
@@ -142,5 +145,5 @@ function levenshteinDistance(a: string, b: string, maxDistance: number): number 
     previous = current;
   }
 
-  return previous[b.length];
+  return previous[b.length] ?? maxDistance + 1;
 }

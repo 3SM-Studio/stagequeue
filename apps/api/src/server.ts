@@ -86,16 +86,23 @@ export function createApiServer(config: Partial<ApiConfig> = {}): Server {
 export async function loadApiConfig(envPath = ".env"): Promise<ApiConfig> {
   const env = { ...(await readEnvFile(envPath)), ...process.env };
 
-  return {
+  const config: ApiConfig = {
     host: env.API_HOST || DEFAULT_CONFIG.host,
     port: parsePort(env.API_PORT, DEFAULT_CONFIG.port),
-    adminToken: optionalText(env.API_ADMIN_TOKEN),
     eventsDir: DEFAULT_CONFIG.eventsDir,
     songIndexPath: DEFAULT_CONFIG.songIndexPath,
-    allowedOrigins: DEFAULT_CONFIG.allowedOrigins,
     logLevel: parseLogLevel(env.API_LOG_LEVEL),
     logger: DEFAULT_CONFIG.logger
   };
+  const adminToken = optionalText(env.API_ADMIN_TOKEN);
+  if (adminToken !== undefined) {
+    config.adminToken = adminToken;
+  }
+  if (DEFAULT_CONFIG.allowedOrigins !== undefined) {
+    config.allowedOrigins = DEFAULT_CONFIG.allowedOrigins;
+  }
+
+  return config;
 }
 
 async function routeRequest(request: IncomingMessage, response: ServerResponse, config: ApiConfig): Promise<void> {
@@ -156,6 +163,9 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse, 
       requireAdmin(request, config);
       const requestId = pathParts[4];
       const action = pathParts[5];
+      if (!requestId || !action) {
+        throw new ApiError(404, "not_found", "Route not found");
+      }
       await handleRequestAction(response, config, eventId, requestId, action);
       return;
     }
@@ -186,13 +196,20 @@ async function handleSearch(response: ServerResponse, url: URL, config: ApiConfi
 async function handleCreateEvent(request: IncomingMessage, response: ServerResponse, config: ApiConfig): Promise<void> {
   const body = await readJsonBody(request);
   const id = parseEventId(readRequiredString(body, "id"));
-  const state = createEvent({
+  const createInput: Parameters<typeof createEvent>[0] = {
     id,
     name: readRequiredString(body, "name"),
-    venue: readOptionalString(body, "venue"),
-    date: readOptionalString(body, "date"),
     status: "active"
-  });
+  };
+  const venue = readOptionalString(body, "venue");
+  const date = readOptionalString(body, "date");
+  if (venue !== undefined) {
+    createInput.venue = venue;
+  }
+  if (date !== undefined) {
+    createInput.date = date;
+  }
+  const state = createEvent(createInput);
 
   await saveQueueState(eventPath(config, id), state);
   sendJson(response, 201, { event: state.event });
@@ -222,15 +239,18 @@ async function handleParticipantRequest(request: IncomingMessage, response: Serv
     throw new ApiError(404, "not_found", `Song not found in local index: ${songSource}:${songSourceId}`);
   }
 
-  const nextState = addRequest(state, {
+  const addInput: Parameters<typeof addRequest>[1] = {
     singerName,
     displayName: singerName,
     songSource,
     songSourceId: song.sourceSongId,
     songTitle: song.title,
-    songArtist: song.artist,
-    songUrl: song.sourceUrl ?? undefined
-  });
+    songArtist: song.artist
+  };
+  if (song.sourceUrl !== null) {
+    addInput.songUrl = song.sourceUrl;
+  }
+  const nextState = addRequest(state, addInput);
   const addedRequest = findNewestRequest(state, nextState);
 
   await saveQueueState(eventPath(config, eventId), nextState);
@@ -421,6 +441,10 @@ function logAccess(context: RequestContext, status: number): void {
     return;
   }
 
+  if (context.method === "OPTIONS" && context.config.logLevel !== "debug") {
+    return;
+  }
+
   const durationMs = Date.now() - context.startedAt;
   context.config.logger.log(`[api] ${context.requestId} ${context.method} ${context.pathname} ${status} ${durationMs}ms`);
 }
@@ -442,6 +466,7 @@ function applyCors(request: IncomingMessage, response: ServerResponse, config: A
     response.setHeader("vary", "Origin");
     response.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
     response.setHeader("access-control-allow-headers", "Content-Type,Authorization");
+    response.setHeader("access-control-max-age", "600");
   }
 }
 

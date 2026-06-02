@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
-const roots = ["src", "apps/api/src", "tests"];
+const roots = ["src", "apps/api/src", "packages/db/src", "packages/domain/src", "tests"];
 const tsFiles = [];
 
 for (const root of roots) {

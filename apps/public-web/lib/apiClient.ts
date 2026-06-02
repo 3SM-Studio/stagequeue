@@ -1,0 +1,220 @@
+import {
+  assertActiveEventResponse,
+  assertPublicQueueResponse,
+  assertSubmitRequestResponse,
+  assertVenueResponse
+} from "./apiValidation.ts"
+import { isReservedPublicPathSlug } from "./staticSlugGuard.ts"
+
+export type Venue = {
+  id: string
+  slug: string
+  name: string
+  address: string | null
+  city: string | null
+  country: string
+  timezone: string
+  status: string
+  verificationStatus: string
+}
+
+export type PublicEvent = {
+  id: string
+  venueId: string
+  operatedByOrganizationId: string
+  name: string
+  slug: string
+  status: "active" | "paused" | "draft" | "scheduled" | "closed" | "archived" | "cancelled" | string
+  startsAt: string | null
+  endsAt: string | null
+  publicJoinEnabled: boolean
+  publicQueueEnabled: boolean
+}
+
+export type ActiveEventLookup = {
+  venue: {
+    id: string
+    slug: string
+    name: string
+    city: string | null
+    timezone: string
+  }
+  activeEvent: PublicEvent | null
+}
+
+export type QueueItem = {
+  id: string
+  singerName: string
+  songTitle: string
+  songArtist: string
+  position?: number | null
+}
+
+export type PublicQueue = {
+  event: {
+    id: string
+    name: string
+    status: string
+  } | null
+  activeEvent?: PublicEvent | null
+  venue: {
+    id: string
+    name: string
+    slug: string
+  }
+  now: QueueItem | null
+  queue: QueueItem[]
+  submissions: {
+    enabled: boolean
+    reason?: string
+  }
+}
+
+export type SubmitSongRequestInput = {
+  singerName: string
+  sourceId: string
+  sourceTrackId?: string
+  songTitle: string
+  songArtist: string
+  songUrl?: string
+  note?: string
+}
+
+export type SubmitSongRequestResult = {
+  request: {
+    id: string
+    status: string
+    singerName: string
+    songTitle: string
+    songArtist: string
+    sourceId: string
+    sourceTrackId: string
+  }
+}
+
+export type ApiErrorBody = {
+  error?: {
+    code?: string
+    message?: string
+  }
+}
+
+export class PublicApiError extends Error {
+  readonly status: number
+  readonly code: string
+
+  constructor(status: number, code: string, message: string) {
+    super(message)
+    this.name = "PublicApiError"
+    this.status = status
+    this.code = code
+  }
+}
+
+const DEFAULT_API_URL = "http://localhost:4321"
+
+export function getBrowserApiBaseUrl(): string {
+  return normalizeBaseUrl(process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL)
+}
+
+export function buildPublicApiUrl(path: string, params: Record<string, string | number | undefined> = {}): string {
+  const url = new URL(path, `${getBrowserApiBaseUrl()}/`)
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) {
+      url.searchParams.set(key, String(value))
+    }
+  }
+  return url.toString()
+}
+
+export const getPublicApiBaseUrl = getBrowserApiBaseUrl
+
+export function buildPublicEventStreamUrl(eventId: string): string {
+  return buildPublicApiUrl(`/public/events/${encodeURIComponent(eventId)}/stream`)
+}
+
+export function buildPublicVenueStreamUrl(venueSlug: string): string {
+  return buildPublicApiUrl(`/public/venues/${encodeURIComponent(venueSlug)}/stream`)
+}
+
+export async function getVenue(venueSlug: string): Promise<Venue> {
+  assertPublicVenueSlug(venueSlug)
+  return assertVenueResponse(await fetchJson(`/public/venues/${encodeURIComponent(venueSlug)}`)).venue
+}
+
+export async function getActiveEvent(venueSlug: string): Promise<ActiveEventLookup> {
+  assertPublicVenueSlug(venueSlug)
+  return assertActiveEventResponse(await fetchJson(`/public/venues/${encodeURIComponent(venueSlug)}/active-event`))
+}
+
+export async function getPublicQueue(eventId: string): Promise<PublicQueue> {
+  return assertPublicQueueResponse(await fetchJson(`/public/events/${encodeURIComponent(eventId)}/queue`))
+}
+
+export async function getPublicQueueByVenueSlug(venueSlug: string): Promise<PublicQueue> {
+  assertPublicVenueSlug(venueSlug)
+  return assertPublicQueueResponse(await fetchJson(`/public/venues/${encodeURIComponent(venueSlug)}/queue`))
+}
+
+export async function submitSongRequest(eventId: string, input: SubmitSongRequestInput): Promise<SubmitSongRequestResult> {
+  return assertSubmitRequestResponse(
+    await fetchJson(`/public/events/${encodeURIComponent(eventId)}/requests`, {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: {
+        "Content-Type": "application/json"
+      }
+    })
+  )
+}
+
+export async function submitSongRequestByVenueSlug(
+  venueSlug: string,
+  input: SubmitSongRequestInput
+): Promise<SubmitSongRequestResult> {
+  assertPublicVenueSlug(venueSlug)
+  return assertSubmitRequestResponse(
+    await fetchJson(`/public/venues/${encodeURIComponent(venueSlug)}/requests`, {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: {
+        "Content-Type": "application/json"
+      }
+    })
+  )
+}
+
+function assertPublicVenueSlug(venueSlug: string): void {
+  if (isReservedPublicPathSlug(venueSlug)) {
+    throw new PublicApiError(404, "NOT_FOUND", "Public route is reserved")
+  }
+}
+
+async function fetchJson(path: string, init: RequestInit = {}): Promise<unknown> {
+  const response = await fetch(buildPublicApiUrl(path), {
+    ...init,
+    cache: "no-store",
+    credentials: init.credentials ?? "include"
+  })
+
+  if (!response.ok) {
+    const body = await readApiErrorBody(response)
+    throw new PublicApiError(response.status, body.error?.code ?? "API_ERROR", body.error?.message ?? "API request failed")
+  }
+
+  return response.json() as Promise<unknown>
+}
+
+async function readApiErrorBody(response: Response): Promise<ApiErrorBody> {
+  try {
+    return (await response.json()) as ApiErrorBody
+  } catch {
+    return {}
+  }
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, "")
+}
+
+export { DEFAULT_API_URL, normalizeBaseUrl }

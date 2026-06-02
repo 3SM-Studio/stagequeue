@@ -39,16 +39,7 @@ export async function runQueueCli(args: string[], io: CliIO = {}): Promise<numbe
         return await createCommand(parsed, stdout, eventsDir);
       case "add":
         return await updateCommand(parsed, stdout, eventsDir, (state) =>
-          addRequest(state, {
-            singerName: requiredFlag(parsed, "singer"),
-            displayName: optionalFlag(parsed, "display-name"),
-            songTitle: requiredFlag(parsed, "title"),
-            songArtist: requiredFlag(parsed, "artist"),
-            songSource: parseSongSource(requiredFlag(parsed, "source")),
-            songSourceId: optionalFlag(parsed, "source-id"),
-            songUrl: optionalFlag(parsed, "url"),
-            note: optionalFlag(parsed, "note")
-          })
+          addRequest(state, readManualAddRequestInput(parsed))
         );
       case "add-from-search":
         return await addFromSearchCommand(parsed, stdout, stderr, eventsDir, songIndexPath);
@@ -92,13 +83,20 @@ export async function runQueueCli(args: string[], io: CliIO = {}): Promise<numbe
 
 async function createCommand(parsed: ParsedArgs, stdout: (message: string) => void, eventsDir: string): Promise<number> {
   const eventId = parseEventId(requiredFlag(parsed, "id"));
-  const state = createEvent({
+  const input: Parameters<typeof createEvent>[0] = {
     id: eventId,
     name: requiredFlag(parsed, "name"),
-    venue: optionalFlag(parsed, "venue"),
-    date: optionalFlag(parsed, "date"),
     status: "active"
-  });
+  };
+  const venue = optionalFlag(parsed, "venue");
+  const date = optionalFlag(parsed, "date");
+  if (venue !== undefined) {
+    input.venue = venue;
+  }
+  if (date !== undefined) {
+    input.date = date;
+  }
+  const state = createEvent(input);
 
   await saveQueueState(eventPath(eventId, eventsDir), state);
   stdout(`Queue event created: ${eventId}`);
@@ -167,15 +165,18 @@ async function addFromSearchCommand(parsed: ParsedArgs, stdout: (message: string
   }
 
   const song = selected.result.song;
-  const nextState = addRequest(state, {
+  const input: Parameters<typeof addRequest>[1] = {
     singerName,
     displayName: singerName,
     songSource: songSourceFromLocalSong(song),
     songSourceId: song.sourceSongId,
     songTitle: song.title,
-    songArtist: song.artist,
-    songUrl: song.sourceUrl ?? undefined
-  });
+    songArtist: song.artist
+  };
+  if (song.sourceUrl !== null) {
+    input.songUrl = song.sourceUrl;
+  }
+  const nextState = addRequest(state, input);
   const addedRequest = findNewestRequest(state, nextState);
 
   if (dryRun) {
@@ -262,15 +263,45 @@ function findNewestRequest(before: QueueState, after: QueueState): SongRequest |
   return after.requests.find((request) => !beforeIds.has(request.id));
 }
 
+function readManualAddRequestInput(parsed: ParsedArgs): Parameters<typeof addRequest>[1] {
+  const input: Parameters<typeof addRequest>[1] = {
+    singerName: requiredFlag(parsed, "singer"),
+    songTitle: requiredFlag(parsed, "title"),
+    songArtist: requiredFlag(parsed, "artist"),
+    songSource: parseSongSource(requiredFlag(parsed, "source"))
+  };
+  const displayName = optionalFlag(parsed, "display-name");
+  const songSourceId = optionalFlag(parsed, "source-id");
+  const songUrl = optionalFlag(parsed, "url");
+  const note = optionalFlag(parsed, "note");
+  if (displayName !== undefined) {
+    input.displayName = displayName;
+  }
+  if (songSourceId !== undefined) {
+    input.songSourceId = songSourceId;
+  }
+  if (songUrl !== undefined) {
+    input.songUrl = songUrl;
+  }
+  if (note !== undefined) {
+    input.note = note;
+  }
+
+  return input;
+}
+
 function selectSearchResult(results: SearchResult[], pick: number | undefined, minScore: number): { ok: true; result: SearchResult } | { ok: false; message: string; bestScore?: number } {
   if (pick !== undefined) {
     const result = results[pick - 1];
     if (!result) {
-      return {
+      const failure: { ok: false; message: string; bestScore?: number } = {
         ok: false,
-        message: `Pick is outside the result range: ${pick}`,
-        bestScore: results[0]?.score
+        message: `Pick is outside the result range: ${pick}`
       };
+      if (results[0]?.score !== undefined) {
+        failure.bestScore = results[0].score;
+      }
+      return failure;
     }
 
     return { ok: true, result };
@@ -307,6 +338,9 @@ function parseArgs(args: string[]): ParsedArgs {
 
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
+    if (value === undefined) {
+      continue;
+    }
 
     if (!command && !value.startsWith("--")) {
       command = value;

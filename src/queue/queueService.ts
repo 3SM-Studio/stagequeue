@@ -180,11 +180,15 @@ export function getPublicQueue(state: QueueState, options: PublicQueueOptions = 
   const next = approved[0] ? toPublicItem(approved[0], options) : undefined;
   const upcoming = approved.slice(1).map((request) => toPublicItem(request, options));
 
-  return {
-    now: now ? toPublicItem(now, options) : undefined,
-    next,
-    upcoming
-  };
+  const publicQueue: PublicQueue = { upcoming };
+  if (now) {
+    publicQueue.now = toPublicItem(now, options);
+  }
+  if (next) {
+    publicQueue.next = next;
+  }
+
+  return publicQueue;
 }
 
 export function getOperatorQueue(state: QueueState): OperatorQueue {

@@ -36,7 +36,7 @@ export type ISingApiSong = {
 };
 
 export type LocalSong = {
-  source: "ising";
+  source: "ising" | "karafun";
   sourceSongId: string;
   title: string;
   subtitle: string | null;

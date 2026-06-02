@@ -139,19 +139,32 @@ async function postAction(baseUrl: string, eventId: string, requestId: string, a
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const headers = buildRequestHeaders(init);
   const response = await fetch(url, {
     ...init,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      ...init.headers
-    }
+    ...(headers ? { headers } : {})
   });
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {
-    const message = body && typeof body.message === "string" ? body.message : "Nie udało się wykonać operacji.";
+    const message = isRecord(body) && typeof body.message === "string" ? body.message : "Nie udało się wykonać operacji.";
     throw new Error(message);
   }
 
   return body as T;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function buildRequestHeaders(init: RequestInit): Record<string, string> | undefined {
+  const headers = new Headers(init.headers);
+
+  if (init.body !== undefined && !headers.has("content-type")) {
+    headers.set("content-type", "application/json; charset=utf-8");
+  }
+
+  const entries = Array.from(headers.entries());
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }

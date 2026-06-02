@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -119,6 +120,38 @@ test("API responds to local Vite CORS preflight", async () => {
     assert.equal(response.status, 204);
     assert.equal(response.headers["access-control-allow-origin"], "http://127.0.0.1:5173");
     assert.equal(response.headers["access-control-allow-methods"], "GET,POST,OPTIONS");
+    assert.equal(response.headers["access-control-max-age"], "600");
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
+test("OPTIONS does not generate access logs when API_LOG_LEVEL is info", async () => {
+  const api = await startTestApi({ logLevel: "info" });
+  try {
+    const response = await requestJson(api.baseUrl, "OPTIONS", "/api/events/test-event/public-queue", undefined, undefined, {
+      origin: "http://127.0.0.1:5173",
+      "access-control-request-method": "GET"
+    });
+
+    assert.equal(response.status, 204);
+    assert.deepEqual(api.logs, []);
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
+test("OPTIONS can generate access logs when API_LOG_LEVEL is debug", async () => {
+  const api = await startTestApi({ logLevel: "debug" });
+  try {
+    const response = await requestJson(api.baseUrl, "OPTIONS", "/api/events/test-event/operator-queue", undefined, undefined, {
+      origin: "http://127.0.0.1:5173",
+      "access-control-request-method": "GET"
+    });
+
+    assert.equal(response.status, 204);
+    assert.equal(api.logs.length, 1);
+    assert.match(api.logs[0], /^\[api\] [0-9a-f-]{36} OPTIONS \/api\/events\/test-event\/operator-queue 204 \d+ms$/);
   } finally {
     await cleanupApi(api);
   }
@@ -407,13 +440,15 @@ async function startTestApi(options: { writeSongIndex?: boolean; songs?: LocalSo
     port: 0,
     eventsDir,
     songIndexPath,
-    adminToken: options.adminToken,
     logLevel: options.logLevel ?? "silent",
     logger: {
       log: (message) => logs.push(message),
       error: (message) => errors.push(message)
     }
   };
+  if (options.adminToken !== undefined) {
+    config.adminToken = options.adminToken;
+  }
 
   if (options.writeSongIndex !== false) {
     await writeFile(songIndexPath, JSON.stringify(options.songs ?? fixtureSongs(), null, 2), "utf8");
@@ -424,10 +459,7 @@ async function startTestApi(options: { writeSongIndex?: boolean; songs?: LocalSo
     server.listen(0, "127.0.0.1", resolve);
   });
 
-  const address = server.address();
-  assert.equal(typeof address, "object");
-  assert.ok(address);
-  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const baseUrl = `http://127.0.0.1:${getTcpServerAddress(server).port}`;
 
   return {
     baseUrl,
@@ -441,6 +473,14 @@ async function startTestApi(options: { writeSongIndex?: boolean; songs?: LocalSo
         server.close((error) => (error ? reject(error) : resolve()));
       })
   };
+}
+
+function getTcpServerAddress(server: { address(): string | AddressInfo | null }): AddressInfo {
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected TCP server address");
+  }
+  return address;
 }
 
 async function cleanupApi(api: TestApi): Promise<void> {

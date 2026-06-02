@@ -20,6 +20,27 @@ test("web API client refuses iSing URLs", () => {
   assert.throws(() => createApiClient("https://api.ising.pl/v2"), /cannot use iSing URL/);
 });
 
+test("web API client does not send Content-Type for GET requests", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedInit: RequestInit | undefined;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    capturedInit = init;
+    return new Response(JSON.stringify({ query: "krolowa", results: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8" }
+    });
+  }) as typeof fetch;
+
+  try {
+    await createApiClient("http://127.0.0.1:4321").searchSongs("krolowa");
+
+    assert.equal(capturedInit?.headers, undefined);
+    assert.equal(capturedInit?.body, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function fixtureSong(): SearchResultDto {
   return {
     source: "ising",

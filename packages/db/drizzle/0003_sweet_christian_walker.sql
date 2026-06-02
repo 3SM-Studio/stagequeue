@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "song_requests_one_now_per_event_unique" ON "song_requests" USING btree ("event_id") WHERE "song_requests"."status" = 'now';

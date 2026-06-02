@@ -5,19 +5,27 @@ import type { ISingImporterConfig } from "./types.ts";
 export async function loadISingImporterConfig(envPath = ".env"): Promise<ISingImporterConfig> {
   const env = { ...(await readEnvFile(envPath)), ...process.env };
 
-  return {
+  const config: ISingImporterConfig = {
     apiBaseUrl: env.ISING_API_BASE_URL || "https://api.ising.pl/v2",
     clientId: requiredEnv(env.ISING_CLIENT_ID, "ISING_CLIENT_ID"),
     delayMs: parsePositiveInteger(env.ISING_IMPORT_DELAY_MS, 3000),
     tag: env.ISING_IMPORT_TAG || "",
     order: env.ISING_IMPORT_ORDER || "-artist_string",
-    contactEmail: optionalEnv(env.ISING_IMPORT_CONTACT_EMAIL),
-    userAgent: optionalEnv(env.ISING_IMPORT_USER_AGENT),
     outputSongsPath: resolve("data/imports/ising-songs.json"),
     outputReportPath: resolve("data/imports/ising-import-report.json"),
     timeoutMs: 15_000,
     maxNetworkRetries: 1
   };
+  const contactEmail = optionalEnv(env.ISING_IMPORT_CONTACT_EMAIL);
+  const userAgent = optionalEnv(env.ISING_IMPORT_USER_AGENT);
+  if (contactEmail !== undefined) {
+    config.contactEmail = contactEmail;
+  }
+  if (userAgent !== undefined) {
+    config.userAgent = userAgent;
+  }
+
+  return config;
 }
 
 async function readEnvFile(path: string): Promise<Record<string, string>> {

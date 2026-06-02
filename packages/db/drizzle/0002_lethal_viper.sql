@@ -1,0 +1,2 @@
+ALTER TABLE "access_requests" ADD COLUMN "venue_access_role" text DEFAULT 'karaoke_operator' NOT NULL;--> statement-breakpoint
+ALTER TABLE "organizations" ADD COLUMN "type" text DEFAULT 'karaoke_company' NOT NULL;
