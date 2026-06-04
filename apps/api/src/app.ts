@@ -17,6 +17,7 @@ import { registerHealthRoutes } from "./routes/health.ts"
 import { registerMeRoutes } from "./routes/me.ts"
 import { registerPlatformRoutes } from "./routes/platform.ts"
 import { registerPublicRoutes } from "./routes/public.ts"
+import { registerSetupRoutes } from "./modules/setup/routes.ts"
 import type { CurrentUserResolver } from "./permissions/request.ts"
 import type { PermissionService } from "./permissions/service.ts"
 import { registerModuleServices, type ApiModuleServices } from "./plugins/modules.ts"
@@ -62,6 +63,7 @@ export async function createApiApp(options: CreateApiAppOptions = {}): Promise<F
 
   await registerHealthRoutes(app, config)
   await registerMeRoutes(app)
+  await registerSetupRoutes(app)
   await registerPublicRoutes(app)
   await registerDashboardRoutes(app)
   await registerPlatformRoutes(app)

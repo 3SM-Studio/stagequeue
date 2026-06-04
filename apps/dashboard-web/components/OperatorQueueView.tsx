@@ -1,21 +1,20 @@
 "use client"
 
-import Link from "next/link"
 import { useCallback, useEffect, useState, type ReactNode } from "react"
 import {
   approveRequest,
   buildDashboardEventStreamUrl,
-  buildGoogleSignInUrl,
   doneRequest,
   getOperatorQueue,
+  moveRequest,
   type OperatorQueueItem,
   type OperatorQueueResponse,
   rejectRequest,
   skipRequest,
-  startRequest,
-  moveRequest
+  startRequest
 } from "../lib/apiClient"
 import { getOperatorQueueErrorState, shouldRefetchOperatorQueue } from "../lib/operatorQueueState"
+import { GoogleSignInButton } from "./GoogleSignInButton"
 
 type StreamStatus = "connecting" | "connected" | "reconnecting" | "disconnected"
 
@@ -114,9 +113,7 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
           <h1>{error.title}</h1>
           <p className="lead">{error.message}</p>
           <div className="actions">
-            <Link className="button" href={buildGoogleSignInUrl()}>
-              Zaloguj przez Google
-            </Link>
+            <GoogleSignInButton />
           </div>
         </section>
       </main>

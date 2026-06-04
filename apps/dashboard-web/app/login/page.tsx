@@ -1,24 +1,23 @@
 import Link from "next/link"
-import { buildGoogleSignInUrl } from "../../lib/apiClient.ts"
+import { GoogleSignInButton } from "../../components/GoogleSignInButton"
 
 export const metadata = {
   title: "Logowanie"
 }
 
 export default function LoginPage() {
-  const signInUrl = buildGoogleSignInUrl()
-
   return (
     <main className="page-shell narrow">
       <section className="panel">
         <h1>Zaloguj sie</h1>
         <p className="lead">Dashboard uzywa Better Auth w API. Google OAuth potwierdza tozsamosc, a API decyduje o dostepie.</p>
         <div className="actions">
-          <Link className="button" href={signInUrl}>
-            Zaloguj przez Google
-          </Link>
+          <GoogleSignInButton />
           <Link className="button secondary" href="/dashboard">
             Wroc do dashboardu
+          </Link>
+          <Link className="button secondary" href="/setup">
+            Pierwszy setup platformy
           </Link>
         </div>
       </section>

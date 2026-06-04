@@ -186,6 +186,10 @@ Kryterium gotowości:
   - [x] unauthenticated,
   - [x] access pending,
   - [x] dashboard allowed.
+- [x] `/setup` pozwala jednorazowo nadać pierwszego `platform_owner` przez `PLATFORM_SETUP_TOKEN`.
+- [x] `GET /setup/status` nie leakuję userów ani emaili, zwraca tylko `setupRequired`.
+- [x] `POST /setup/claim-platform-owner` wymaga zalogowanej sesji Better Auth i tokena.
+- [x] `BOOTSTRAP_PLATFORM_OWNER_EMAIL` zostaje oznaczony jako legacy/dev fallback.
 
 ### D1 foundation — DONE
 
@@ -194,7 +198,7 @@ Kryterium gotowości:
 - [x] Root `typecheck` obejmuje `apps/dashboard-web`.
 - [x] Dashboard komunikuje się tylko z Fastify API przez `NEXT_PUBLIC_API_URL`.
 - [x] `GET /me` jest wywoływane z `credentials: include`.
-- [x] Better Auth Google CTA używa `/auth/sign-in/social?provider=google`.
+- [x] Better Auth Google CTA używa client-side `authClient.signIn.social({ provider: "google" })`.
 - [x] D1 nie implementuje jeszcze operator queue actions ani CRUD.
 
 ### Operator queue

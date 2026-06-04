@@ -1,6 +1,7 @@
 import { cookies } from "next/headers"
 import Link from "next/link"
-import { buildGoogleSignInUrl, getMe } from "../../lib/apiClient.ts"
+import { GoogleSignInButton } from "../../components/GoogleSignInButton"
+import { getMe } from "../../lib/apiClient.ts"
 import { getDashboardViewState } from "../../lib/dashboardState.ts"
 
 export const metadata = {
@@ -18,9 +19,7 @@ export default async function DashboardPage() {
           <h1>{state.title}</h1>
           <p className="lead">{state.message}</p>
           <div className="actions">
-            <Link className="button" href={buildGoogleSignInUrl()}>
-              Zaloguj przez Google
-            </Link>
+            <GoogleSignInButton />
           </div>
         </section>
       </main>

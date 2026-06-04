@@ -9,6 +9,11 @@ import {
 } from "../modules/organizations/service.ts"
 import { createEventsService, type EventsService } from "../modules/events/service.ts"
 import { createQueueService, type QueueService } from "../modules/queue/service.ts"
+import {
+  createDbPlatformSetupRepository,
+  createPlatformSetupService,
+  type PlatformSetupService
+} from "../modules/setup/service.ts"
 import { createVenuesService, type VenuesService } from "../modules/venues/service.ts"
 
 export type ApiModuleServices = {
@@ -17,6 +22,7 @@ export type ApiModuleServices = {
   events: EventsService
   queue: QueueService
   accessRequests: AccessRequestsService
+  setup: PlatformSetupService
 }
 
 declare module "fastify" {
@@ -26,6 +32,7 @@ declare module "fastify" {
     events: EventsService
     queue: QueueService
     accessRequests: AccessRequestsService
+    setup: PlatformSetupService
   }
 }
 
@@ -42,4 +49,5 @@ export async function registerModuleServices(app: FastifyInstance, overrides: Pa
       })
   )
   app.decorate("accessRequests", overrides.accessRequests ?? createAccessRequestsService(app.db))
+  app.decorate("setup", overrides.setup ?? createPlatformSetupService(createDbPlatformSetupRepository(app.db)))
 }

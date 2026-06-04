@@ -67,6 +67,22 @@ export type QueueActionResponse = {
   request: OperatorQueueItem
 }
 
+export type PlatformSetupStatusResponse = {
+  setupRequired: boolean
+}
+
+export type ClaimPlatformOwnerResponse = {
+  user: {
+    id: string
+    email: string
+    name: string | null
+    status: "active"
+  }
+  platform: {
+    roles: ["platform_owner"]
+  }
+}
+
 export class DashboardApiError extends Error {
   status: number
   code: string
@@ -105,11 +121,27 @@ export function buildDashboardEventStreamUrl(eventId: string): string {
   return buildDashboardApiUrl(`/dashboard/events/${encodeURIComponent(eventId)}/stream`)
 }
 
-export function buildGoogleSignInUrl(callbackUrl = `${getDashboardWebBaseUrl()}/dashboard`): string {
-  const url = new URL("/auth/sign-in/social", `${getDashboardApiBaseUrl()}/`)
-  url.searchParams.set("provider", "google")
-  url.searchParams.set("callbackURL", callbackUrl)
-  return url.toString()
+export async function getPlatformSetupStatus(options: { fetchImpl?: DashboardFetch } = {}): Promise<PlatformSetupStatusResponse> {
+  return assertPlatformSetupStatusResponse(await fetchDashboardJson("/setup/status", {}, options.fetchImpl))
+}
+
+export async function claimPlatformOwner(
+  setupToken: string,
+  options: { fetchImpl?: DashboardFetch } = {}
+): Promise<ClaimPlatformOwnerResponse> {
+  return assertClaimPlatformOwnerResponse(
+    await fetchDashboardJson(
+      "/setup/claim-platform-owner",
+      {
+        body: JSON.stringify({ setupToken }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      },
+      options.fetchImpl
+    )
+  )
 }
 
 export async function getMe(options: { cookieHeader?: string; fetchImpl?: DashboardFetch } = {}): Promise<DashboardMeResponse> {
@@ -364,6 +396,51 @@ function assertQueueActionResponse(value: unknown): QueueActionResponse {
 
   return {
     request: value.request
+  }
+}
+
+export function assertPlatformSetupStatusResponse(value: unknown): PlatformSetupStatusResponse {
+  if (!isRecord(value) || typeof value.setupRequired !== "boolean") {
+    throw new Error("Invalid dashboard API response: setup status")
+  }
+
+  return {
+    setupRequired: value.setupRequired
+  }
+}
+
+export function assertClaimPlatformOwnerResponse(value: unknown): ClaimPlatformOwnerResponse {
+  if (!isRecord(value)) {
+    throw new Error("Invalid dashboard API response: setup claim")
+  }
+
+  const user = value.user
+  const platform = value.platform
+
+  if (
+    !isRecord(user) ||
+    typeof user.id !== "string" ||
+    typeof user.email !== "string" ||
+    (typeof user.name !== "string" && user.name !== null) ||
+    user.status !== "active" ||
+    !isRecord(platform) ||
+    !Array.isArray(platform.roles) ||
+    platform.roles.length !== 1 ||
+    platform.roles[0] !== "platform_owner"
+  ) {
+    throw new Error("Invalid dashboard API response: setup claim")
+  }
+
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      status: user.status
+    },
+    platform: {
+      roles: ["platform_owner"]
+    }
   }
 }
 

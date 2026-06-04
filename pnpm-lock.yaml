@@ -72,6 +72,9 @@ importers:
 
   apps/dashboard-web:
     dependencies:
+      better-auth:
+        specifier: 1.6.11
+        version: 1.6.11(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.20.0)(kysely@0.28.17)(pg@8.21.0))(next@16.2.6(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(pg@8.21.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       next:
         specifier: ^16.2.6
         version: 16.2.6(react-dom@19.2.6(react@19.2.6))(react@19.2.6)

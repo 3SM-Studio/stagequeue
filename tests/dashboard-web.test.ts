@@ -4,13 +4,15 @@ import {
   approveRequest,
   assertOperatorQueueResponse,
   assertMeResponse,
+  assertPlatformSetupStatusResponse,
   buildDashboardEventStreamUrl,
   buildDashboardApiUrl,
-  buildGoogleSignInUrl,
+  claimPlatformOwner,
   doneRequest,
   getDashboardApiBaseUrl,
   getMe,
   getOperatorQueue,
+  getPlatformSetupStatus,
   moveRequest,
   type OperatorQueueItem,
   rejectRequest,
@@ -18,8 +20,17 @@ import {
   startRequest,
   type DashboardFetch
 } from "../apps/dashboard-web/lib/apiClient.ts"
+import {
+  buildGoogleSignInOptions,
+  DASHBOARD_AUTH_BASE_PATH,
+  getDashboardAuthClientBaseUrl,
+  getGoogleSignInCallbackUrl,
+  getGoogleSignInErrorMessage,
+  signInWithGoogle
+} from "../apps/dashboard-web/lib/authClient.ts"
 import { getDashboardViewState } from "../apps/dashboard-web/lib/dashboardState.ts"
 import { getOperatorQueueErrorState, shouldRefetchOperatorQueue } from "../apps/dashboard-web/lib/operatorQueueState.ts"
+import { getPlatformSetupViewState } from "../apps/dashboard-web/lib/setupState.ts"
 
 test("dashboard-web API client builds URLs against NEXT_PUBLIC_API_URL", () => {
   withDashboardEnv({ NEXT_PUBLIC_API_URL: "http://localhost:4321/" }, () => {
@@ -47,20 +58,75 @@ test("dashboard-web getMe uses credentials include", async () => {
   assert.equal(requestedCookie, "session=abc")
 })
 
-test("dashboard-web login URL points at Better Auth Google sign-in endpoint", () => {
+test("dashboard-web auth client base URL uses NEXT_PUBLIC_API_URL", () => {
   withDashboardEnv(
     {
       NEXT_PUBLIC_API_URL: "http://localhost:4321/",
       NEXT_PUBLIC_DASHBOARD_URL: "http://localhost:3001/"
     },
     () => {
-      const url = new URL(buildGoogleSignInUrl())
-
-      assert.equal(url.origin, "http://localhost:4321")
-      assert.equal(url.pathname, "/auth/sign-in/social")
-      assert.equal(url.searchParams.get("provider"), "google")
-      assert.equal(url.searchParams.get("callbackURL"), "http://localhost:3001/dashboard")
+      assert.equal(getDashboardAuthClientBaseUrl(), "http://localhost:4321")
     }
+  )
+})
+
+test("dashboard-web auth client uses Fastify Better Auth base path", () => {
+  assert.equal(DASHBOARD_AUTH_BASE_PATH, "/auth")
+})
+
+test("dashboard-web Google sign-in helper uses Better Auth social options", async () => {
+  let requestedOptions: unknown
+
+  await withDashboardEnvAsync(
+    {
+      NEXT_PUBLIC_API_URL: "http://localhost:4321/",
+      NEXT_PUBLIC_DASHBOARD_URL: "http://localhost:3001/"
+    },
+    async () => {
+      await signInWithGoogle({
+        signIn: {
+          social: async (options) => {
+            requestedOptions = options
+            return { error: null }
+          }
+        }
+      })
+    }
+  )
+
+  assert.deepEqual(requestedOptions, {
+    provider: "google",
+    callbackURL: "http://localhost:3001/dashboard"
+  })
+})
+
+test("dashboard-web Google sign-in helpers keep callback URL and do not build a GET auth URL", () => {
+  withDashboardEnv(
+    {
+      NEXT_PUBLIC_API_URL: "http://localhost:4321/",
+      NEXT_PUBLIC_DASHBOARD_URL: "http://localhost:3001/"
+    },
+    () => {
+      assert.equal(getGoogleSignInCallbackUrl(), "http://localhost:3001/dashboard")
+      assert.deepEqual(buildGoogleSignInOptions(), {
+        provider: "google",
+        callbackURL: "http://localhost:3001/dashboard"
+      })
+      assert.equal(JSON.stringify(buildGoogleSignInOptions()).includes("/auth/sign-in/social"), false)
+    }
+  )
+})
+
+test("dashboard-web maps Better Auth social sign-in errors to readable messages", async () => {
+  assert.equal(getGoogleSignInErrorMessage({ error: { message: "Google OAuth is not configured" } }), "Google OAuth is not configured")
+  await assert.rejects(
+    () =>
+      signInWithGoogle({
+        signIn: {
+          social: async () => ({ error: { message: "Google OAuth is not configured" } })
+        }
+      }),
+    /Google OAuth is not configured/
   )
 })
 
@@ -123,6 +189,106 @@ test("dashboard-web allowed state exposes shell and nav data", () => {
 test("dashboard-web validates /me response shape", () => {
   assert.deepEqual(assertMeResponse({ authenticated: false }), { authenticated: false })
   assert.throws(() => assertMeResponse({ authenticated: true, user: {} }), /Invalid dashboard API response: me/)
+})
+
+test("dashboard-web setup state maps completed setup", () => {
+  const state = getPlatformSetupViewState({ setupRequired: false }, { authenticated: false })
+
+  assert.equal(state.kind, "completed")
+  assert.equal(state.showClaimForm, false)
+  assert.equal(state.showGoogleSignIn, false)
+})
+
+test("dashboard-web setup state asks unauthenticated users to sign in", () => {
+  const state = getPlatformSetupViewState({ setupRequired: true }, { authenticated: false })
+
+  assert.equal(state.kind, "unauthenticated")
+  assert.equal(state.showClaimForm, false)
+  assert.equal(state.showGoogleSignIn, true)
+})
+
+test("dashboard-web setup state shows claim form only after authentication", () => {
+  const state = getPlatformSetupViewState(
+    { setupRequired: true },
+    {
+      authenticated: true,
+      user: {
+        id: "user-1",
+        email: "owner@example.com",
+        name: null,
+        status: "pending"
+      },
+      platform: {
+        roles: []
+      },
+      access: {
+        dashboardAllowed: false,
+        reason: "pending_approval"
+      }
+    }
+  )
+
+  assert.equal(state.kind, "claim")
+  assert.equal(state.showClaimForm, true)
+  assert.equal(state.showGoogleSignIn, false)
+  if (state.kind === "claim") {
+    assert.equal(state.userEmail, "owner@example.com")
+  }
+})
+
+test("dashboard-web setup status client fetches setup status", async () => {
+  let requestedUrl = ""
+  let requestedCredentials: RequestCredentials | undefined
+
+  const result = await getPlatformSetupStatus({
+    fetchImpl: async (input, init) => {
+      requestedUrl = String(input)
+      requestedCredentials = init?.credentials
+      return jsonResponse({ setupRequired: true })
+    }
+  })
+
+  assert.equal(requestedUrl, "http://localhost:4321/setup/status")
+  assert.equal(requestedCredentials, "include")
+  assert.deepEqual(result, { setupRequired: true })
+})
+
+test("dashboard-web setup token submit uses credentials include", async () => {
+  let requestedUrl = ""
+  let requestedMethod = ""
+  let requestedCredentials: RequestCredentials | undefined
+  let requestedBody = ""
+
+  const result = await claimPlatformOwner("setup-secret", {
+    fetchImpl: async (input, init) => {
+      requestedUrl = String(input)
+      requestedMethod = init?.method ?? ""
+      requestedCredentials = init?.credentials
+      requestedBody = String(init?.body)
+      return jsonResponse({
+        platform: {
+          roles: ["platform_owner"]
+        },
+        user: {
+          id: "user-1",
+          email: "owner@example.com",
+          name: null,
+          status: "active"
+        }
+      })
+    }
+  })
+
+  assert.equal(requestedUrl, "http://localhost:4321/setup/claim-platform-owner")
+  assert.equal(requestedMethod, "POST")
+  assert.equal(requestedCredentials, "include")
+  assert.deepEqual(JSON.parse(requestedBody), { setupToken: "setup-secret" })
+  assert.deepEqual(result.platform.roles, ["platform_owner"])
+})
+
+test("dashboard-web validates setup status response shape", () => {
+  assert.deepEqual(assertPlatformSetupStatusResponse({ setupRequired: false }), { setupRequired: false })
+  assert.throws(() => assertPlatformSetupStatusResponse({}), /Invalid dashboard API response: setup status/)
 })
 
 test("dashboard-web API client builds operator queue URL", async () => {

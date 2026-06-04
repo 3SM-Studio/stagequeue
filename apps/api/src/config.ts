@@ -18,6 +18,8 @@ export type ApiConfig = {
   publicRequestMaxActivePerParticipant: number
   publicRequestCooldownSeconds: number
   bootstrapPlatformOwnerEmail?: string
+  platformSetupToken?: string
+  platformSetupEnabled: boolean
   logLevel: "silent" | "info" | "debug"
 }
 
@@ -69,6 +71,7 @@ export function parseApiConfig(env: Record<string, string | undefined>): ApiConf
     participantTokenSecret: rawParticipantTokenSecret ?? authSecret,
     publicRequestMaxActivePerParticipant: parsePositiveInteger(env.PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT, 3),
     publicRequestCooldownSeconds: parsePositiveInteger(env.PUBLIC_REQUEST_COOLDOWN_SECONDS, 20),
+    platformSetupEnabled: parseBoolean(env.PLATFORM_SETUP_ENABLED, true),
     logLevel: parseLogLevel(env.API_LOG_LEVEL)
   }
   const cookieDomain = readText(env.COOKIE_DOMAIN)
@@ -78,6 +81,10 @@ export function parseApiConfig(env: Record<string, string | undefined>): ApiConf
   const bootstrapPlatformOwnerEmail = readText(env.BOOTSTRAP_PLATFORM_OWNER_EMAIL)?.toLowerCase()
   if (bootstrapPlatformOwnerEmail !== undefined) {
     config.bootstrapPlatformOwnerEmail = bootstrapPlatformOwnerEmail
+  }
+  const platformSetupToken = readText(env.PLATFORM_SETUP_TOKEN)
+  if (platformSetupToken !== undefined) {
+    config.platformSetupToken = platformSetupToken
   }
 
   return config
@@ -146,6 +153,17 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
   }
 
   return parsed
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === "true") {
+    return true
+  }
+  if (value === "false") {
+    return false
+  }
+
+  return fallback
 }
 
 function readText(value: string | undefined): string | undefined {

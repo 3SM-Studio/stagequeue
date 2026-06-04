@@ -234,7 +234,10 @@ AUTH_SECRET=replace_me_with_at_least_32_random_characters
 PARTICIPANT_TOKEN_SECRET=replace_me_with_at_least_32_random_characters
 PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT=3
 PUBLIC_REQUEST_COOLDOWN_SECONDS=20
+# Legacy/dev fallback only.
 BOOTSTRAP_PLATFORM_OWNER_EMAIL=replace_me@example.com
+PLATFORM_SETUP_ENABLED=true
+PLATFORM_SETUP_TOKEN=replace_me_with_one_time_setup_token
 ```
 
 Better Auth zapisuje swoje dane w tabelach `auth_users`, `auth_sessions`, `auth_accounts` i `auth_verifications`. Domenowy rekord platformy jest mapowany przez `users.auth_user_id`, a role platformowe sa w `platform_memberships`; nie ma docelowego `isAdmin`.
@@ -244,9 +247,36 @@ Better Auth zapisuje swoje dane w tabelach `auth_users`, `auth_sessions`, `auth_
 - bez sesji zwraca `{ "authenticated": false }`,
 - z sesja tworzy albo aktualizuje domenowego usera,
 - user bez approval ma `status: "pending"` i nie ma dashboard access,
-- user z emailem rownym `BOOTSTRAP_PLATFORM_OWNER_EMAIL` dostaje idempotentnie role `platform_owner` i status `active`.
+- produkcyjny first-owner flow powinien uzywac `PLATFORM_SETUP_TOKEN` i `/setup` w dashboardzie,
+- `BOOTSTRAP_PLATFORM_OWNER_EMAIL` zostaje tylko jako legacy/dev fallback i tymczasowy shortcut,
+- user z emailem rownym `BOOTSTRAP_PLATFORM_OWNER_EMAIL` moze nadal dostac idempotentnie role `platform_owner` i status `active` w dev/legacy flow.
 
 W produkcji cookies Better Auth maja dzialac jako secure httpOnly session cookies. Dla subdomen ustaw `COOKIE_DOMAIN=.poza-nuta.pl`; lokalnie `COOKIE_DOMAIN=localhost` albo puste ustawienie pozwala testowac dev flow.
+
+### Platform setup / first owner
+
+Docelowy mechanizm pierwszego ownera platformy to jednorazowy setup:
+
+```txt
+http://localhost:3001/setup
+```
+
+API udostepnia:
+
+```txt
+GET  /setup/status
+POST /setup/claim-platform-owner
+```
+
+`GET /setup/status` zwraca tylko `{ "setupRequired": true|false }`. `setupRequired=true` oznacza, ze w `platform_memberships` nie ma jeszcze aktywnego `platform_owner`.
+
+`POST /setup/claim-platform-owner` wymaga:
+
+- zalogowanej sesji Better Auth,
+- poprawnego `PLATFORM_SETUP_TOKEN` w body `{ "setupToken": "..." }`,
+- braku istniejacego aktywnego `platform_owner`.
+
+Po poprawnym claimie API ustawia domenowego usera jako `active` i zapisuje `platform_owner` w `platform_memberships`. Gdy pierwszy owner istnieje, setup jest zamkniety i kolejne claimy zwracaja `409 SETUP_ALREADY_COMPLETED`. Kolejni platform ownerzy maja byc dodawani pozniej przez platform ownera w UI platform members.
 
 Do jednorazowego sprawdzenia runtime bez zostawiania serwera w terminalu:
 
@@ -469,6 +499,7 @@ D1 route'y:
 
 - `/` - przekierowanie do `/dashboard`,
 - `/login` - CTA logowania przez Google,
+- `/setup` - jednorazowy first-owner setup przez `PLATFORM_SETUP_TOKEN`,
 - `/dashboard` - odczyt `GET /me` i shell dostepu,
 - `/dashboard/access` - stan dostepu closed beta,
 - `/dashboard/organizations` - placeholder,
@@ -476,10 +507,19 @@ D1 route'y:
 - `/dashboard/events` - wejscie manualne po eventId,
 - `/dashboard/events/:eventId/queue` - D2 operator queue MVP.
 
-Login CTA kieruje do Better Auth w API:
+Login CTA nie jest zwyklym linkiem do endpointu auth. Dashboard uzywa Better Auth client flow:
 
 ```txt
-/auth/sign-in/social?provider=google&callbackURL=http://localhost:3001/dashboard
+authClient.signIn.social({
+  provider: "google",
+  callbackURL: "http://localhost:3001/dashboard"
+})
+```
+
+Lokalny Google OAuth setup wymaga `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` i `AUTH_SECRET` w API. Redirect URI w Google Console powinien wskazywac Better Auth callback API:
+
+```txt
+http://localhost:4321/auth/callback/google
 ```
 
 Bez prawdziwych Google OAuth credentials lokalnie mozna zweryfikowac render i stan `authenticated=false`, ale nie nalezy raportowac pelnego OAuth smoke jako przechodzacego. `GET /me` nadal jest zrodlem prawdy dla stanow:

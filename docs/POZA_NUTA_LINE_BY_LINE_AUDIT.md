@@ -514,7 +514,9 @@ H1-H6 są zamknięte. Dashboard-web D1 foundation i D2 operator queue MVP zosta�
 - DONE: root `pnpm dev` uruchamia API, public-web i dashboard-web.
 - DONE: root `pnpm build` buduje public-web i dashboard-web.
 - DONE: root `pnpm typecheck` obejmuje `apps/dashboard-web`.
-- DONE: `/login` kieruje do Better Auth API pod `/auth/sign-in/social?provider=google`.
+- DONE: `/login` używa Better Auth client `authClient.signIn.social({ provider: "google" })`.
+- DONE: `/setup` dodaje one-time first-owner flow przez `PLATFORM_SETUP_TOKEN`.
+- DONE: `BOOTSTRAP_PLATFORM_OWNER_EMAIL` jest opisany jako legacy/dev fallback, nie produkcyjny mechanizm ownera.
 - DONE: `/dashboard` wywołuje `GET /me` przez Fastify API z `credentials: include`.
 - DONE: dashboard rozróżnia `authenticated=false`, `dashboardAllowed=false` i `dashboardAllowed=true`.
 - DONE: `/dashboard/events` pozwala manualnie otworzyć kolejkę po eventId.

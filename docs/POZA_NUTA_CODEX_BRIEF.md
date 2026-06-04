@@ -248,7 +248,7 @@ Dashboard D1 foundation zawiera:
 - `/dashboard/organizations` placeholder,
 - `/dashboard/venues` placeholder,
 - `/dashboard/events` placeholder,
-- Better Auth Google CTA przez `/auth/sign-in/social?provider=google`,
+- Better Auth Google CTA przez client-side `authClient.signIn.social({ provider: "google" })`,
 - `GET /me` jako źródło prawdy dla dostępu.
 
 Dashboard D2 operator queue MVP zawiera:
@@ -259,6 +259,23 @@ Dashboard D2 operator queue MVP zawiera:
 - akcje approve/reject/start/done/skip/move przez istniejące Fastify endpointy,
 - SSE `GET /dashboard/events/:eventId/stream` i refetch po `queue.updated`, `request.*` oraz `event.*`,
 - obsługę `401`, `403`, `409` bez obchodzenia permission layera.
+
+## 7a. Platform setup / first owner
+
+`BOOTSTRAP_PLATFORM_OWNER_EMAIL` zostaje tylko jako legacy/dev fallback. Produkcyjny target pierwszego ownera platformy to:
+
+```txt
+PLATFORM_SETUP_TOKEN + dashboard /setup + API /setup/claim-platform-owner
+```
+
+Reguły:
+
+- `GET /setup/status` zwraca tylko `setupRequired: true|false`.
+- `setupRequired=true` tylko gdy nie istnieje aktywny `platform_owner` w `platform_memberships`.
+- `POST /setup/claim-platform-owner` wymaga zalogowanej sesji Better Auth i poprawnego `PLATFORM_SETUP_TOKEN`.
+- Claim aktywuje domenowego usera i zapisuje `platform_owner` w `platform_memberships`.
+- Po pierwszym aktywnym ownerze setup jest zamknięty i kolejne claimy zwracają `409 SETUP_ALREADY_COMPLETED`.
+- Kolejni platform ownerzy mają być dodawani później przez platform ownera w UI platform members.
 
 Dashboard MVP nadal ma dodać:
 

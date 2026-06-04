@@ -479,6 +479,8 @@ function testConfig(): ApiConfig {
     publicRequestMaxActivePerParticipant: 3,
     publicRequestCooldownSeconds: 20,
     bootstrapPlatformOwnerEmail: "owner@example.com",
+    platformSetupEnabled: true,
+    platformSetupToken: "test-platform-setup-token",
     logLevel: "silent"
   }
 }
