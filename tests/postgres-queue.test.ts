@@ -124,6 +124,114 @@ test("public submit with cookie reuses the same participant token hash", async (
   }
 })
 
+test("venue-first my-requests without participant cookie returns an empty list", async () => {
+  const queue = createInMemoryQueueService()
+  const app = await createTestApp({ queue })
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/public/venues/klub-x/my-requests"
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json(), { requests: [] })
+  } finally {
+    await app.close()
+  }
+})
+
+test("venue-first my-requests returns only requests owned by participant cookie", async () => {
+  const ownerToken = "participant-token-owned-by-this-browser-123"
+  const otherToken = "participant-token-owned-by-another-browser"
+  const ownerHash = hashParticipantToken(ownerToken, testConfig().participantTokenSecret)
+  const otherHash = hashParticipantToken(otherToken, testConfig().participantTokenSecret)
+  const queue = createInMemoryQueueService()
+  queue.addRequest(ACTIVE_EVENT_ID, "pending", {
+    participantTokenHash: ownerHash,
+    singerName: "Owner",
+    displayName: "Owner",
+    songArtist: "ABBA",
+    songTitle: "Dancing Queen"
+  })
+  queue.addRequest(ACTIVE_EVENT_ID, "approved", {
+    participantTokenHash: otherHash,
+    singerName: "Other",
+    displayName: "Other",
+    songArtist: "NSYNC",
+    songTitle: "Bye Bye Bye"
+  })
+  const app = await createTestApp({ queue })
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/public/venues/klub-x/my-requests",
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${ownerToken}` }
+    })
+    const body = response.json()
+    const serialized = response.body
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(body.requests.length, 1)
+    assert.equal(body.requests[0].singerName, "Owner")
+    assert.equal(body.requests[0].artist, "ABBA")
+    assert.equal(body.requests[0].title, "Dancing Queen")
+    assert.equal(body.requests[0].status, "pending")
+    assert.equal(serialized.includes(ownerToken), false)
+    assert.equal(serialized.includes(ownerHash), false)
+    assert.equal(serialized.includes(otherHash), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("venue-first my-requests returns all public request statuses for the participant", async () => {
+  const token = "participant-token-for-all-statuses-123"
+  const participantTokenHash = hashParticipantToken(token, testConfig().participantTokenSecret)
+  const queue = createInMemoryQueueService()
+  for (const status of ["pending", "approved", "now", "done", "rejected", "skipped"]) {
+    queue.addRequest(ACTIVE_EVENT_ID, status, { participantTokenHash })
+  }
+  const app = await createTestApp({ queue })
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/public/venues/klub-x/my-requests",
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` }
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(
+      response.json().requests.map((request: { status: string }) => request.status).sort(),
+      ["approved", "done", "now", "pending", "rejected", "skipped"]
+    )
+  } finally {
+    await app.close()
+  }
+})
+
+test("venue-first my-requests returns empty when venue has no active or paused event", async () => {
+  const token = "participant-token-no-active-event-12345"
+  const participantTokenHash = hashParticipantToken(token, testConfig().participantTokenSecret)
+  const queue = createInMemoryQueueService()
+  queue.addRequest(CLOSED_EVENT_ID, "done", { participantTokenHash })
+  const app = await createTestApp({
+    events: fakeEventsService({ lookup: makePublicLookup(null) }),
+    queue
+  })
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/public/venues/klub-x/my-requests",
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` }
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json(), { requests: [] })
+  } finally {
+    await app.close()
+  }
+})
+
 test("max active requests per participant blocks another public submit", async () => {
   const start = new Date("2026-05-29T18:10:00.000Z")
   const token = "participant-token-for-active-limit"
@@ -540,6 +648,20 @@ test("operator queue shows pending approved and now buckets", async () => {
   }
 })
 
+test("platform owner support access can view operator queue", async () => {
+  const queue = createInMemoryQueueService()
+  queue.addRequest(ACTIVE_EVENT_ID, "pending")
+  const app = await createTestApp({ queue, permissions: fakePermissions({ platformOwner: true }) })
+  try {
+    const response = await app.inject({ method: "GET", url: `/dashboard/events/${ACTIVE_EVENT_ID}/operator-queue` })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().pending.length, 1)
+  } finally {
+    await app.close()
+  }
+})
+
 test("approve pending request appends position and writes queue event", async () => {
   const queue = createInMemoryQueueService()
   const request = queue.addRequest(ACTIVE_EVENT_ID, "pending")
@@ -554,6 +676,24 @@ test("approve pending request appends position and writes queue event", async ()
     assert.equal(response.json().request.status, "approved")
     assert.equal(response.json().request.position, 1)
     assert.equal(queue.state.queueEvents.at(-1)?.type, "request.approved")
+  } finally {
+    await app.close()
+  }
+})
+
+test("platform owner support access can approve pending request", async () => {
+  const queue = createInMemoryQueueService()
+  const request = queue.addRequest(ACTIVE_EVENT_ID, "pending")
+  const app = await createTestApp({ queue, permissions: fakePermissions({ platformOwner: true }) })
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/dashboard/events/${ACTIVE_EVENT_ID}/requests/${request.id}/approve`
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().request.status, "approved")
+    assert.equal(response.json().request.position, 1)
   } finally {
     await app.close()
   }
@@ -575,6 +715,43 @@ test("approve successive pending requests assigns positions 1, 2 and 3", async (
     }
 
     assert.deepEqual(approvedPositions(queue.state, ACTIVE_EVENT_ID), [1, 2, 3])
+  } finally {
+    await app.close()
+  }
+})
+
+test("platform owner support access can start and finish a request", async () => {
+  const queue = createInMemoryQueueService()
+  const request = queue.addRequest(ACTIVE_EVENT_ID, "approved", { position: 1 })
+  const app = await createTestApp({ queue, permissions: fakePermissions({ platformOwner: true }) })
+  try {
+    const start = await app.inject({
+      method: "POST",
+      url: `/dashboard/events/${ACTIVE_EVENT_ID}/requests/${request.id}/start`
+    })
+    const done = await app.inject({
+      method: "POST",
+      url: `/dashboard/events/${ACTIVE_EVENT_ID}/requests/${request.id}/done`
+    })
+
+    assert.equal(start.statusCode, 200)
+    assert.equal(start.json().request.status, "now")
+    assert.equal(done.statusCode, 200)
+    assert.equal(done.json().request.status, "done")
+  } finally {
+    await app.close()
+  }
+})
+
+test("event staff queue operator still has operator queue access", async () => {
+  const queue = createInMemoryQueueService()
+  queue.addRequest(ACTIVE_EVENT_ID, "pending")
+  const app = await createTestApp({ queue, permissions: fakePermissions({ event: new Set(["event.operate_queue"]) }) })
+  try {
+    const response = await app.inject({ method: "GET", url: `/dashboard/events/${ACTIVE_EVENT_ID}/operator-queue` })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().pending.length, 1)
   } finally {
     await app.close()
   }
@@ -975,6 +1152,21 @@ function createInMemoryQueueService(options: { now?: Date } = {}): TestQueueServ
         submissions: { enabled: event.status === "active" }
       }
     },
+    async listParticipantRequests(eventId, participantTokenHash) {
+      requireEvent(state, eventId)
+      return state.requests
+        .filter((request) => request.eventId === eventId && request.participantTokenHash === participantTokenHash)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .map((request) => ({
+          id: request.id,
+          status: request.status,
+          singerName: request.displayName,
+          artist: request.songArtist,
+          title: request.songTitle,
+          position: request.position,
+          createdAt: request.createdAt
+        }))
+    },
     async submitPublicRequest(eventId, input) {
       const event = requireEvent(state, eventId)
       if (event.status !== "active") {
@@ -1206,7 +1398,8 @@ function readParticipantCookie(response: { headers: Record<string, string | numb
   return value
 }
 
-function fakePermissions(options: { event?: Set<string> } = {}): PermissionService {
+function fakePermissions(options: { event?: Set<string>; platformOwner?: boolean } = {}): PermissionService {
+  const hasPlatformSupportAccess = options.platformOwner === true
   return {
     hasPlatformPermission: async () => false,
     requirePlatformPermission: async () => requireAllowed(false),
@@ -1214,8 +1407,9 @@ function fakePermissions(options: { event?: Set<string> } = {}): PermissionServi
     requireOrganizationPermission: async () => requireAllowed(false),
     hasVenuePermission: async () => false,
     requireVenuePermission: async () => requireAllowed(false),
-    hasEventPermission: async (_userId, _eventId, permission) => Boolean(options.event?.has(permission)),
-    requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission))
+    hasEventPermission: async (_userId, _eventId, permission) => hasPlatformSupportAccess || Boolean(options.event?.has(permission)),
+    requireEventPermission: async (_userId, _eventId, permission) =>
+      requireAllowed(hasPlatformSupportAccess || options.event?.has(permission))
   }
 }
 

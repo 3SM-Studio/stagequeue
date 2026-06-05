@@ -8,6 +8,11 @@ export type GoogleSignInOptions = {
   callbackURL: string
 }
 
+export type GoogleSignInTarget = {
+  callbackPath?: string
+  callbackURL?: string
+}
+
 export type SocialSignInResult = {
   error?: {
     message?: string | undefined
@@ -29,14 +34,20 @@ export function getDashboardAuthClientBaseUrl(): string {
   return getDashboardApiBaseUrl()
 }
 
-export function getGoogleSignInCallbackUrl(): string {
-  return `${getDashboardWebBaseUrl()}/dashboard`
+export function getGoogleSignInCallbackUrl(target: GoogleSignInTarget = {}): string {
+  if (target.callbackURL) {
+    return target.callbackURL
+  }
+
+  const callbackPath = target.callbackPath ?? "/dashboard"
+  const normalizedPath = callbackPath.startsWith("/") ? callbackPath : `/${callbackPath}`
+  return `${getDashboardWebBaseUrl()}${normalizedPath}`
 }
 
-export function buildGoogleSignInOptions(): GoogleSignInOptions {
+export function buildGoogleSignInOptions(target: GoogleSignInTarget = {}): GoogleSignInOptions {
   return {
     provider: "google",
-    callbackURL: getGoogleSignInCallbackUrl()
+    callbackURL: getGoogleSignInCallbackUrl(target)
   }
 }
 
@@ -45,8 +56,8 @@ export function getGoogleSignInErrorMessage(result: SocialSignInResult | null | 
   return message && message.trim() ? message : null
 }
 
-export async function signInWithGoogle(client: DashboardAuthClient = authClient): Promise<void> {
-  const result = await client.signIn.social(buildGoogleSignInOptions())
+export async function signInWithGoogle(target: GoogleSignInTarget = {}, client: DashboardAuthClient = authClient): Promise<void> {
+  const result = await client.signIn.social(buildGoogleSignInOptions(target))
   const message = getGoogleSignInErrorMessage(result)
   if (message) {
     throw new Error(message)

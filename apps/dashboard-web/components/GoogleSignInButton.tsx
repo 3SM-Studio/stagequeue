@@ -3,7 +3,12 @@
 import { useState } from "react"
 import { signInWithGoogle } from "../lib/authClient"
 
-export function GoogleSignInButton() {
+type GoogleSignInButtonProps = {
+  callbackPath?: string
+  callbackURL?: string
+}
+
+export function GoogleSignInButton({ callbackPath = "/dashboard", callbackURL }: GoogleSignInButtonProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -17,7 +22,7 @@ export function GoogleSignInButton() {
           setLoading(true)
           setError(null)
           try {
-            await signInWithGoogle()
+            await signInWithGoogle(callbackURL ? { callbackURL } : { callbackPath })
           } catch (signInError) {
             setError(signInError instanceof Error ? signInError.message : "Nie udalo sie rozpoczac logowania przez Google.")
           } finally {

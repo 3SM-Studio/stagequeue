@@ -1,0 +1,8 @@
+# Example CODEOWNERS. Rename to .github/CODEOWNERS and adjust owners.
+
+/docs/standards/        @engineering-leads
+/docs/poza-nuta/        @product-owner @engineering-leads
+/docs/runbooks/         @engineering-leads @ops
+/src/modules/auth/      @security-owner
+/src/modules/events/    @domain-owner-events
+/src/modules/queue/     @domain-owner-queue

@@ -8,6 +8,7 @@ import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
 import type { PermissionService } from "../apps/api/src/permissions/service.ts"
 import type {
+  DashboardEventSummary,
   EventStaffAssignmentSummary,
   EventSummary,
   EventsService,
@@ -33,6 +34,135 @@ test("organization with venue access can create an event", async () => {
     assert.equal(response.statusCode, 201)
     assert.equal(response.json().event.slug, "friday")
     assert.equal(events.state.events.size, 1)
+  } finally {
+    await app.close()
+  }
+})
+
+test("platform owner can create an event without operatedByOrganizationId", async () => {
+  const events = createInMemoryEventsService()
+  const app = await createTestApp({ events, permissions: fakePermissions({ platform: new Set(["platform.manage_venues"]) }) })
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: {
+        venueId: VENUE_ID,
+        name: "Test Karaoke",
+        slug: "test-karaoke",
+        status: "draft",
+        publicJoinEnabled: false,
+        publicQueueEnabled: false
+      }
+    })
+    const body = response.json()
+
+    assert.equal(response.statusCode, 201)
+    assert.equal(body.event.slug, "test-karaoke")
+    assert.equal(body.event.status, "draft")
+    assert.equal(body.event.publicJoinEnabled, false)
+    assert.equal(body.event.publicQueueEnabled, false)
+    assert.equal(body.event.venue.name, "Demo Klub")
+    assert.equal(body.event.operatedByOrganization.name, "Poza Nuta Demo")
+  } finally {
+    await app.close()
+  }
+})
+
+test("create event validates required fields and status", async () => {
+  const events = createInMemoryEventsService()
+  const app = await createTestApp({ events, permissions: fakePermissions({ platform: new Set(["platform.manage_venues"]) }) })
+  try {
+    const missingVenue = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: { name: "Test", slug: "test", status: "draft" }
+    })
+    const missingName = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: { venueId: VENUE_ID, slug: "test", status: "draft" }
+    })
+    const missingSlug = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: { venueId: VENUE_ID, name: "Test", status: "draft" }
+    })
+    const invalidStatus = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: { venueId: VENUE_ID, name: "Test", slug: "test", status: "paused" }
+    })
+
+    assert.equal(missingVenue.statusCode, 400)
+    assert.equal(missingName.statusCode, 400)
+    assert.equal(missingSlug.statusCode, 400)
+    assert.equal(invalidStatus.statusCode, 400)
+  } finally {
+    await app.close()
+  }
+})
+
+test("create event maps duplicate venue slug to controlled conflict", async () => {
+  const events = createInMemoryEventsService()
+  events.addSeedEvent("test-karaoke", "draft")
+  const app = await createTestApp({ events, permissions: fakePermissions({ platform: new Set(["platform.manage_venues"]) }) })
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: {
+        venueId: VENUE_ID,
+        name: "Test Karaoke Again",
+        slug: "test-karaoke",
+        status: "draft"
+      }
+    })
+
+    assert.equal(response.statusCode, 409)
+    assert.equal(response.json().error.code, "EVENT_SLUG_CONFLICT")
+  } finally {
+    await app.close()
+  }
+})
+
+test("user without create permission cannot create an event", async () => {
+  const events = createInMemoryEventsService()
+  const app = await createTestApp({ events, permissions: fakePermissions() })
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: eventPayload("blocked")
+    })
+
+    assert.equal(response.statusCode, 403)
+    assert.equal(response.json().error.code, "FORBIDDEN")
+  } finally {
+    await app.close()
+  }
+})
+
+test("dashboard events list includes venue and operated organization context", async () => {
+  const events = createInMemoryEventsService()
+  events.addSeedEvent("demo-karaoke", "active")
+  const app = await createTestApp({ events })
+  try {
+    const response = await app.inject({ method: "GET", url: "/dashboard/events" })
+    const body = response.json()
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(body.events[0].slug, "demo-karaoke")
+    assert.deepEqual(body.events[0].venue, {
+      id: VENUE_ID,
+      name: "Demo Klub",
+      slug: "demo-klub"
+    })
+    assert.deepEqual(body.events[0].operatedByOrganization, {
+      id: ORG_ID,
+      name: "Poza Nuta Demo",
+      slug: "poza-nuta-demo"
+    })
   } finally {
     await app.close()
   }
@@ -306,19 +436,30 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
       return event
     },
     async listForUser() {
-      return [...state.events.values()]
+      return [...state.events.values()].map(toDashboardEvent)
     },
     async getById(eventId) {
       return state.events.get(eventId) ?? null
+    },
+    async getDashboardById(eventId) {
+      const event = state.events.get(eventId)
+      return event ? toDashboardEvent(event) : null
     },
     async createEvent(input) {
       if (!state.organizationHasAccess) {
         throw new ApiHttpError(403, "FORBIDDEN", "Organization does not have active access to this venue")
       }
+      if ([...state.events.values()].some((event) => event.venueId === input.venueId && event.slug === input.slug)) {
+        throw new ApiHttpError(409, "EVENT_SLUG_CONFLICT", "Event slug already exists for this venue")
+      }
       const event = {
         ...makeEvent(`aaaaaaaa-aaaa-4aaa-8aaa-${String(state.events.size + 1).padStart(12, "0")}`, input.slug, input.status),
         startsAt: toDateOrNull(input.startsAt),
-        endsAt: toDateOrNull(input.endsAt)
+        endsAt: toDateOrNull(input.endsAt),
+        operatedByOrganizationId: input.operatedByOrganizationId ?? ORG_ID,
+        publicJoinEnabled: input.publicJoinEnabled ?? false,
+        publicQueueEnabled: input.publicQueueEnabled ?? false,
+        venueId: input.venueId
       }
       state.events.set(event.id, event)
       return event
@@ -411,6 +552,22 @@ function makeEvent(id: string, slug: string, status: string): EventSummary {
     endsAt: null,
     publicJoinEnabled: true,
     publicQueueEnabled: true
+  }
+}
+
+function toDashboardEvent(event: EventSummary): DashboardEventSummary {
+  return {
+    ...event,
+    venue: {
+      id: VENUE_ID,
+      name: "Demo Klub",
+      slug: "demo-klub"
+    },
+    operatedByOrganization: {
+      id: ORG_ID,
+      name: "Poza Nuta Demo",
+      slug: "poza-nuta-demo"
+    }
   }
 }
 

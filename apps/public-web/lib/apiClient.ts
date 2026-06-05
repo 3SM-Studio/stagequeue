@@ -1,5 +1,6 @@
 import {
   assertActiveEventResponse,
+  assertMyRequestsResponse,
   assertPublicQueueResponse,
   assertSubmitRequestResponse,
   assertVenueResponse
@@ -92,6 +93,22 @@ export type SubmitSongRequestResult = {
   }
 }
 
+export type PublicMyRequestStatus = "pending" | "approved" | "now" | "done" | "rejected" | "skipped"
+
+export type PublicMyRequest = {
+  id: string
+  status: PublicMyRequestStatus
+  singerName: string
+  artist: string
+  title: string
+  position: number | null
+  createdAt: string
+}
+
+export type PublicMyRequestsResponse = {
+  requests: PublicMyRequest[]
+}
+
 export type ApiErrorBody = {
   error?: {
     code?: string
@@ -154,6 +171,11 @@ export async function getPublicQueue(eventId: string): Promise<PublicQueue> {
 export async function getPublicQueueByVenueSlug(venueSlug: string): Promise<PublicQueue> {
   assertPublicVenueSlug(venueSlug)
   return assertPublicQueueResponse(await fetchJson(`/public/venues/${encodeURIComponent(venueSlug)}/queue`))
+}
+
+export async function getMyRequestsByVenueSlug(venueSlug: string): Promise<PublicMyRequestsResponse> {
+  assertPublicVenueSlug(venueSlug)
+  return assertMyRequestsResponse(await fetchJson(`/public/venues/${encodeURIComponent(venueSlug)}/my-requests`))
 }
 
 export async function submitSongRequest(eventId: string, input: SubmitSongRequestInput): Promise<SubmitSongRequestResult> {

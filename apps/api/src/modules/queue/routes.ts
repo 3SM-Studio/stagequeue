@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import { ApiHttpError } from "../../errors.ts"
 import { requireActiveCurrentUser } from "../../permissions/request.ts"
 import { startEventStream } from "../streams/eventStreams.ts"
-import { hashParticipantToken, resolveParticipantToken } from "./participant.ts"
+import { PARTICIPANT_COOKIE_NAME, hashParticipantToken, isValidParticipantToken, resolveParticipantToken } from "./participant.ts"
 import { assertPublicQueueVisible, type QueueSongRequest, type SubmitPublicRequestInput } from "./service.ts"
 import {
   readBody,
@@ -50,6 +50,31 @@ export async function registerQueuePublicRoutes(app: FastifyInstance): Promise<v
     return {
       ...(await app.queue.getPublicQueue(lookup.activeEvent.id)),
       activeEvent: lookup.activeEvent
+    }
+  })
+
+  app.get("/public/venues/:venueSlug/my-requests", async (request) => {
+    const venueSlug = readParamSlug(request.params, "venueSlug")
+    const lookup = await requirePublicVenueLookup(app, venueSlug)
+    const participantToken = request.cookies[PARTICIPANT_COOKIE_NAME]
+
+    if (!lookup.activeEvent || !isValidParticipantToken(participantToken)) {
+      return { requests: [] }
+    }
+
+    const participantTokenHash = hashParticipantToken(participantToken, request.server.config.participantTokenSecret)
+    const requests = await app.queue.listParticipantRequests(lookup.activeEvent.id, participantTokenHash)
+
+    return {
+      requests: requests.map((requestRecord) => ({
+        id: requestRecord.id,
+        status: requestRecord.status,
+        singerName: requestRecord.singerName,
+        artist: requestRecord.artist,
+        title: requestRecord.title,
+        position: requestRecord.position,
+        createdAt: requestRecord.createdAt
+      }))
     }
   })
 

@@ -1,41 +1,97 @@
 "use client"
 
-import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import {
   approveRequest,
-  buildDashboardEventStreamUrl,
+  archiveDashboardEvent,
+  cancelDashboardEvent,
+  closeDashboardEvent,
   doneRequest,
+  getDashboardEvent,
   getOperatorQueue,
   moveRequest,
+  pauseDashboardEvent,
+  type DashboardEventDetail,
   type OperatorQueueItem,
   type OperatorQueueResponse,
   rejectRequest,
+  resumeDashboardEvent,
   skipRequest,
-  startRequest
+  startDashboardEvent,
+  startRequest,
+  updateDashboardEventFlags
 } from "../lib/apiClient"
-import { getOperatorQueueErrorState, shouldRefetchOperatorQueue } from "../lib/operatorQueueState"
+import {
+  getDashboardLifecycleErrorState,
+  getEventStatusDescription,
+  getLifecycleActionModels,
+  getPublicJoinLabel,
+  getPublicQueueLabel,
+  isPublicQueueVisibleForDashboard,
+  isPublicSubmitAvailable,
+  type DashboardLifecycleAction
+} from "../lib/eventLifecycleState"
+import {
+  getOperatorQueueErrorState,
+  OPERATOR_QUEUE_REFRESH_ERROR_MESSAGE,
+  OPERATOR_QUEUE_REFRESH_INTERVAL_MS,
+  runOperatorActionWithPending,
+  shouldPollOperatorQueue
+} from "../lib/operatorQueueState"
 import { GoogleSignInButton } from "./GoogleSignInButton"
-
-type StreamStatus = "connecting" | "connected" | "reconnecting" | "disconnected"
 
 export function OperatorQueueView({ eventId }: { eventId: string }) {
   const [queue, setQueue] = useState<OperatorQueueResponse | null>(null)
+  const [eventDetail, setEventDetail] = useState<DashboardEventDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [error, setError] = useState<ReturnType<typeof getOperatorQueueErrorState> | null>(null)
-  const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting")
-  const streamEnabled =
-    queue !== null && error?.kind !== "login" && error?.kind !== "forbidden" && error?.kind !== "not-found"
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const inFlightRefresh = useRef<Promise<void> | null>(null)
+  const busyActionRef = useRef<string | null>(null)
+  const queueRef = useRef<OperatorQueueResponse | null>(null)
 
-  const refresh = useCallback(async () => {
-    try {
-      setQueue(await getOperatorQueue(eventId))
-      setError(null)
-    } catch (queueError) {
-      setError(getOperatorQueueErrorState(queueError))
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    busyActionRef.current = busyAction
+  }, [busyAction])
+
+  useEffect(() => {
+    queueRef.current = queue
+  }, [queue])
+
+  const refresh = useCallback(async (options: { skipWhenBusy?: boolean } = {}) => {
+    if (options.skipWhenBusy && busyActionRef.current !== null) {
+      return
     }
+
+    if (inFlightRefresh.current) {
+      return inFlightRefresh.current
+    }
+
+    setRefreshing(true)
+    const request = Promise.all([getOperatorQueue(eventId), getDashboardEvent(eventId)])
+      .then(([nextQueue, nextEvent]) => {
+        setQueue(nextQueue)
+        setEventDetail(nextEvent.event)
+        setError(null)
+        setRefreshError(null)
+      })
+      .catch((queueError) => {
+        if (queueRef.current) {
+          setRefreshError(OPERATOR_QUEUE_REFRESH_ERROR_MESSAGE)
+        } else {
+          setError(getOperatorQueueErrorState(queueError))
+        }
+      })
+      .finally(() => {
+        setLoading(false)
+        setRefreshing(false)
+        inFlightRefresh.current = null
+      })
+
+    inFlightRefresh.current = request
+    return request
   }, [eventId])
 
   useEffect(() => {
@@ -43,57 +99,62 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
   }, [refresh])
 
   useEffect(() => {
-    if (!streamEnabled) {
-      setStreamStatus("disconnected")
-      return
-    }
-
-    const source = new EventSource(buildDashboardEventStreamUrl(eventId), { withCredentials: true })
-    setStreamStatus("connecting")
-
-    source.addEventListener("open", () => setStreamStatus("connected"))
-    source.addEventListener("error", () => setStreamStatus((status) => (status === "connected" ? "reconnecting" : "disconnected")))
-
-    const onMessage = (event: MessageEvent) => {
-      if (shouldRefetchOperatorQueue(event.type)) {
-        void refresh()
+    const onFocus = () => {
+      if (shouldPollOperatorQueue(document.visibilityState, busyActionRef.current)) {
+        void refresh({ skipWhenBusy: true })
       }
     }
-
-    for (const eventType of [
-      "queue.updated",
-      "request.created",
-      "request.approved",
-      "request.rejected",
-      "request.started",
-      "request.done",
-      "request.skipped",
-      "request.moved",
-      "event.started",
-      "event.paused",
-      "event.resumed",
-      "event.closed"
-    ]) {
-      source.addEventListener(eventType, onMessage)
+    const onVisibilityChange = () => {
+      if (shouldPollOperatorQueue(document.visibilityState, busyActionRef.current)) {
+        void refresh({ skipWhenBusy: true })
+      }
     }
+    const interval = window.setInterval(() => {
+      if (shouldPollOperatorQueue(document.visibilityState, busyActionRef.current)) {
+        void refresh({ skipWhenBusy: true })
+      }
+    }, OPERATOR_QUEUE_REFRESH_INTERVAL_MS)
 
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisibilityChange)
     return () => {
-      setStreamStatus("disconnected")
-      source.close()
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+      window.clearInterval(interval)
     }
-  }, [eventId, refresh, streamEnabled])
+  }, [refresh])
 
-  const runAction = async (label: string, action: () => Promise<unknown>) => {
-    setBusyAction(label)
-    try {
-      await action()
-      await refresh()
-    } catch (actionError) {
-      setError(getOperatorQueueErrorState(actionError))
-    } finally {
-      setBusyAction(null)
-    }
+  const runAction = async (
+    label: string,
+    action: () => Promise<unknown>,
+    mapError: (error: unknown) => ReturnType<typeof getOperatorQueueErrorState> = getOperatorQueueErrorState
+  ) => {
+    await runOperatorActionWithPending({
+      handleError: (actionError) => setError(mapError(actionError)),
+      label,
+      mutate: action,
+      refresh,
+      setPendingAction: setBusyAction
+    })
   }
+
+  const runLifecycleAction = (action: DashboardLifecycleAction) =>
+    runAction(
+      action,
+      async () => {
+        await lifecycleAction(eventId, action)
+      },
+      getDashboardLifecycleErrorState
+    )
+
+  const runFlagAction = (flags: { publicJoinEnabled?: boolean; publicQueueEnabled?: boolean }) =>
+    runAction(
+      "flags",
+      async () => {
+        await updateDashboardEventFlags(eventId, flags)
+      },
+      getDashboardLifecycleErrorState
+    )
 
   if (loading && !queue) {
     return (
@@ -113,7 +174,7 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
           <h1>{error.title}</h1>
           <p className="lead">{error.message}</p>
           <div className="actions">
-            <GoogleSignInButton />
+            <GoogleSignInButton callbackPath={`/dashboard/events/${eventId}/queue`} />
           </div>
         </section>
       </main>
@@ -147,17 +208,33 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
           </p>
         </div>
         <div className="queue-header-actions">
-          <span className={`stream-pill ${streamStatus}`}>{streamStatusLabel(streamStatus)}</span>
-          <button className="button secondary" type="button" onClick={() => void refresh()}>
-            Odswiez
+          <span className="stream-pill disconnected">manual refresh</span>
+          <button className="button secondary" disabled={refreshing || busyAction !== null} type="button" onClick={() => void refresh()}>
+            {refreshing ? "Odswiezanie..." : "Odswiez kolejke"}
           </button>
         </div>
       </section>
+
+      {eventDetail ? (
+        <EventLifecyclePanel
+          busyAction={busyAction}
+          event={eventDetail}
+          venueName={queue.venue.name}
+          onFlagAction={runFlagAction}
+          onLifecycleAction={runLifecycleAction}
+        />
+      ) : null}
 
       {error ? (
         <section className={`notice ${error.kind}`}>
           <strong>{error.title}</strong>
           <span>{error.message}</span>
+        </section>
+      ) : null}
+
+      {refreshError ? (
+        <section className="notice warning">
+          <span>{refreshError}</span>
         </section>
       ) : null}
 
@@ -266,6 +343,102 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
   )
 }
 
+async function lifecycleAction(eventId: string, action: DashboardLifecycleAction): Promise<unknown> {
+  if (action === "start") {
+    return startDashboardEvent(eventId)
+  }
+  if (action === "pause") {
+    return pauseDashboardEvent(eventId)
+  }
+  if (action === "resume") {
+    return resumeDashboardEvent(eventId)
+  }
+  if (action === "close") {
+    return closeDashboardEvent(eventId)
+  }
+  if (action === "archive") {
+    return archiveDashboardEvent(eventId)
+  }
+  return cancelDashboardEvent(eventId)
+}
+
+function EventLifecyclePanel({
+  busyAction,
+  event,
+  onFlagAction,
+  onLifecycleAction,
+  venueName
+}: {
+  busyAction: string | null
+  event: DashboardEventDetail
+  onFlagAction: (flags: { publicJoinEnabled?: boolean; publicQueueEnabled?: boolean }) => Promise<unknown>
+  onLifecycleAction: (action: DashboardLifecycleAction) => Promise<unknown>
+  venueName: string
+}) {
+  const actions = getLifecycleActionModels(event.status)
+  const submitAvailable = isPublicSubmitAvailable(event)
+  const queueVisible = isPublicQueueVisibleForDashboard(event)
+
+  return (
+    <section className="panel event-control-panel">
+      <div className="event-control-main">
+        <div>
+          <p className="muted">Wydarzenie</p>
+          <h2>{event.name}</h2>
+          <p className="muted">{venueName}</p>
+          <p>{getEventStatusDescription(event.status)}</p>
+        </div>
+        <div className="event-control-status">
+          <span className={`status-badge status-${event.status}`}>{event.status}</span>
+          <span className={`pill ${submitAvailable ? "pill-ok" : ""}`}>
+            Public join: {event.publicJoinEnabled ? "on" : "off"}
+          </span>
+          <span className={`pill ${queueVisible ? "pill-ok" : ""}`}>
+            Public queue: {event.publicQueueEnabled ? "on" : "off"}
+          </span>
+        </div>
+      </div>
+
+      <div className="event-control-actions">
+        {actions.length > 0 ? (
+          actions.map((model) => (
+            <button
+              className={`button compact ${model.tone === "secondary" ? "secondary" : ""} ${model.tone === "danger" ? "danger" : ""}`}
+              disabled={busyAction !== null}
+              key={model.action}
+              type="button"
+              onClick={() => void onLifecycleAction(model.action)}
+            >
+              {model.label}
+            </button>
+          ))
+        ) : (
+          <span className="empty">Brak akcji lifecycle dla tego statusu.</span>
+        )}
+      </div>
+
+      <div className="event-control-actions">
+        <button
+          className="button secondary compact"
+          disabled={busyAction !== null}
+          type="button"
+          onClick={() => void onFlagAction({ publicJoinEnabled: !event.publicJoinEnabled })}
+        >
+          {getPublicJoinLabel(event.publicJoinEnabled)}
+        </button>
+        <button
+          className="button secondary compact"
+          disabled={busyAction !== null}
+          type="button"
+          onClick={() => void onFlagAction({ publicQueueEnabled: !event.publicQueueEnabled })}
+        >
+          {getPublicQueueLabel(event.publicQueueEnabled)}
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function QueueSection({ children, empty, title }: { children: ReactNode; empty: string; title: string }) {
   const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children)
   return (
@@ -367,17 +540,4 @@ function formatDate(value: string): string {
   }
 
   return date.toLocaleString("pl-PL")
-}
-
-function streamStatusLabel(status: StreamStatus): string {
-  if (status === "connected") {
-    return "connected"
-  }
-  if (status === "reconnecting") {
-    return "reconnecting"
-  }
-  if (status === "disconnected") {
-    return "disconnected"
-  }
-  return "connecting"
 }

@@ -159,6 +159,12 @@ h2 {
   color: var(--foreground);
 }
 
+.button.danger {
+  border-color: rgba(200, 50, 67, 0.35);
+  background: #fff;
+  color: var(--accent);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -213,6 +219,11 @@ h2 {
   font-weight: 800;
 }
 
+.pill-ok {
+  border-color: rgba(29, 123, 82, 0.4);
+  color: var(--ok);
+}
+
 code {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -220,7 +231,9 @@ code {
   padding: 0.12rem 0.28rem;
 }
 
-input {
+input:not([type="checkbox"]),
+select,
+textarea {
   min-height: 2.75rem;
   width: 100%;
   border: 1px solid var(--border);
@@ -229,6 +242,48 @@ input {
   background: #fff;
   color: var(--foreground);
   font: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.form-grid {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1.25rem;
+}
+
+.form-grid.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.checkbox-grid {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.8rem;
+}
+
+.checkbox-row input {
+  width: auto;
+  margin-top: 0.2rem;
 }
 
 .inline-form {
@@ -259,12 +314,145 @@ input {
   opacity: 0.58;
 }
 
+.segmented-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.segment {
+  min-height: 2.35rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0.45rem 0.8rem;
+}
+
+.segment.active {
+  border-color: rgba(31, 111, 235, 0.45);
+  background: rgba(31, 111, 235, 0.1);
+  color: var(--foreground);
+}
+
+.event-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.compact-section {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.event-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.event-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 1rem;
+}
+
+.event-card-operational {
+  border-color: rgba(31, 111, 235, 0.45);
+  box-shadow: 0 14px 28px rgba(31, 111, 235, 0.12);
+}
+
+.event-card-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.event-card-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.event-card-title-row h3 {
+  margin: 0;
+}
+
+.status-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 900;
+  padding: 0.18rem 0.5rem;
+}
+
+.status-active,
+.status-paused {
+  border-color: rgba(31, 111, 235, 0.45);
+  background: rgba(31, 111, 235, 0.1);
+  color: var(--foreground);
+}
+
+.event-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+}
+
+.event-meta-grid dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.event-meta-grid dd {
+  margin: 0.16rem 0 0;
+  font-weight: 800;
+}
+
 .queue-dashboard-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1rem;
+}
+
+.event-control-panel {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.event-control-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.event-control-main h2 {
+  margin-bottom: 0.35rem;
+}
+
+.event-control-status,
+.event-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.event-control-status {
+  justify-content: flex-end;
 }
 
 .queue-dashboard-header h1 {
@@ -424,7 +612,23 @@ input {
     grid-template-columns: 1fr;
   }
 
+  .event-card-main {
+    display: grid;
+  }
+
+  .event-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .queue-dashboard-header {
     flex-direction: column;
+  }
+
+  .event-control-main {
+    display: grid;
+  }
+
+  .event-control-status {
+    justify-content: flex-start;
   }
 }

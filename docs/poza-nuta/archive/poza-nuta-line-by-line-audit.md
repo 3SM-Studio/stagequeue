@@ -505,27 +505,56 @@ Rekomendowana kolejność:
 6. H6 queue concurrency hardening.
 7. Dopiero potem Phase 12 dashboard-web MVP.
 
-H1-H6 są zamknięte. Dashboard-web D1 foundation i D2 operator queue MVP zostały rozpoczęte jako bezpieczny dashboard workflow bez CRUD, katalogu runtime ani stats.
+H1-H6 są zamknięte. Dashboard-web D1 foundation, D2 operator queue MVP, D3 event selection MVP, D4 event lifecycle controls MVP i D5 minimal event creation zostały rozpoczęte jako bezpieczny dashboard workflow bez pełnego CRUD, katalogu runtime ani stats.
 
-### Dashboard-web D1/D2 foundation — DONE/PARTIAL
+### Dashboard-web D1/D2/D3/D4 foundation — DONE/PARTIAL
 
 - DONE: `apps/dashboard-web` jest realną aplikacją Next.js App Router.
 - DONE: lokalny dashboard działa na `http://localhost:3001` przez `pnpm dev:dashboard`.
 - DONE: root `pnpm dev` uruchamia API, public-web i dashboard-web.
 - DONE: root `pnpm build` buduje public-web i dashboard-web.
 - DONE: root `pnpm typecheck` obejmuje `apps/dashboard-web`.
-- DONE: `/login` używa Better Auth client `authClient.signIn.social({ provider: "google" })`.
+- DONE: `/sign-in` używa Better Auth client `authClient.signIn.social({ provider: "google" })` z callbackiem `/dashboard`.
+- DONE: `/login` zostaje kompatybilnym aliasem do `/sign-in`.
 - DONE: `/setup` dodaje one-time first-owner flow przez `PLATFORM_SETUP_TOKEN`.
+- DONE: login rozpoczęty z `/setup` wraca po Google OAuth do `/setup`, żeby pokazać formularz tokena.
+- DONE: `setupRequired=true` kieruje `/dashboard/*` do `/setup`, bez pokazywania pending approval.
+- DONE: po `setupRequired=false` `/setup` jest one-time route i redirectuje do `/dashboard`, `/sign-in` albo `/dashboard/access`, bez pokazywania token form.
+- DONE: pending approval / closed beta jest pokazywane tylko po zakończonym setupie pierwszego platform ownera.
+- DONE: API/setup status unavailable jest osobnym stanem i nie jest traktowany jako setup-required.
 - DONE: `BOOTSTRAP_PLATFORM_OWNER_EMAIL` jest opisany jako legacy/dev fallback, nie produkcyjny mechanizm ownera.
 - DONE: `/dashboard` wywołuje `GET /me` przez Fastify API z `credentials: include`.
 - DONE: dashboard rozróżnia `authenticated=false`, `dashboardAllowed=false` i `dashboardAllowed=true`.
-- DONE: `/dashboard/events` pozwala manualnie otworzyć kolejkę po eventId.
+- DONE: `/dashboard/events` pokazuje liste eventow dostepnych dla operatora.
+- DONE: eventy sa grupowane w `Aktywne teraz`, `Nadchodzace / robocze` i `Zakonczone`.
+- DONE: eventy `active` i `paused` sa wyroznione jako glowne wejscie operacyjne.
+- DONE: operator nie musi znac event UUID jako glownego flow; manualny eventId zostaje tylko jako fallback QA/dev.
 - DONE: `/dashboard/events/[eventId]/queue` pobiera operator queue z Fastify API.
 - DONE: operator queue UI pokazuje pending/approved/now/done/rejected/skipped.
 - DONE: operator queue UI obsługuje approve/reject/start/done/skip/move przez istniejące endpointy.
-- DONE: dashboard stream SSE robi refetch po `queue.updated`, `request.*` i `event.*`.
+- DONE: operator queue robi deterministyczny refetch po akcjach operatora.
+- DONE: MVP support access pozwala aktywnemu `platform_owner` obslugiwac dowolna operator queue i dashboard event stream; docelowo rozdzielic na audytowany support access/impersonation.
+- DONE: `/dashboard/events/[eventId]/queue` pokazuje panel lifecycle eventu i uzywa `GET /dashboard/events/:eventId` jako zrodla szczegolow eventu.
+- DONE: lifecycle controls uzywaja istniejacych endpointow `POST /dashboard/events/:eventId/start|pause|resume|close|archive|cancel`.
+- DONE: public join/queue flag controls uzywaja `PATCH /dashboard/events/:eventId` i robia refetch operator queue/event state po mutacji.
+- DONE: D4 mapuje `403` oraz `409` na czytelne komunikaty operatora zamiast pokazywac surowe bledy.
+- DONE: D4.1 public join page subskrybuje venue-first SSE i refetchuje active-event state po lifecycle events, wiec pause/resume blokuje albo przywraca formularz bez F5.
+- DONE: D4.1 `/dashboard/events` ma bezpieczny fallback refresh po focus/visibility.
+- DONE: D4.1 traktuje EventSource errors jako nie-fatalne reconnect/stale state, bez crasha UI.
+- DONE: D4.2/P0 usuwa dashboard SSE z krytycznego operator queue flow, zeby nie blokowac mutacji przez browser connection starvation.
+- DONE: D4.2/P0 dodaje AbortController timeout dla lifecycle/flags/queue mutations oraz czytelny timeout error.
+- DONE: D4.2/P0 ustala, ze lifecycle mutation wykonuje POST/PATCH, po sukcesie robi wlasny refetch deterministycznie, a pending action czysci sie w `finally`.
+- DONE: D4.4 `/dashboard/events` ma safe refresh bez EventSource per event: reczny `Odswiez`, timestamp, polling 15s tylko dla widocznej karty, focus/visibility refresh, in-flight guard i non-fatal error zachowujacy poprzednia liste.
+- DONE: D4.5 `/dashboard/events/[eventId]/queue` ma safe refresh operator queue bez krytycznego SSE: reczny `Odswiez kolejke`, polling 5s tylko dla widocznej karty, focus/visibility refresh, in-flight guard, skip auto-refresh podczas mutation pending i non-fatal error zachowujacy poprzedni snapshot.
+- DONE: D4.5 public join sledzi status wlasnego zgloszenia przez `GET /public/venues/:venueSlug/my-requests`; endpoint uzywa `pn_participant`, filtruje po hashu participant tokena i nie zwraca cudzych requestow ani plaintext tokena.
+- DONE: D4.5 public join mapuje statusy `pending`, `approved`, `now`, `done`, `rejected`, `skipped` na komunikaty uczestnika i odswieza je przez safe polling/focus refresh.
+- DONE: D5 `/dashboard/events/new` dodaje minimalny formularz tworzenia eventu bez dotykania DB z dashboard-web.
+- DONE: D5 dashboard pobiera lokale przez `GET /dashboard/venues`, tworzy event przez `POST /dashboard/events` z `credentials: include` i po sukcesie kieruje do `/dashboard/events/:eventId/queue`.
+- DONE: D5 `POST /dashboard/events` zwraca event z kontekstem `venue` i `operatedByOrganization`; `platform_owner` ma MVP support/admin create access, a duplicate slug jest mapowany na `409 EVENT_SLUG_CONFLICT`.
+- FOLLOW-UP: RT1 moze dodac pojedynczy `/dashboard/events/stream` albo `/dashboard/stream`, jesli bedzie potrzebny prawdziwy realtime listy bez streamow per event.
 - TODO: CRUD organizacji/lokali/eventów.
+- TODO: staff assignment UI i tworzenie venue z dashboardu.
 - TODO: platform access request UI.
 - TODO: catalog runtime i stats.
 
-Kolejne dashboard tasks powinny iść etapami: najpierw brakujące event/organization/venue CRUD i platform/admin views, potem catalog runtime albo stats dopiero w osobnych fazach.
+Kolejne dashboard tasks powinny iść etapami: najpierw brakujące event/organization/venue CRUD, staff assignment UI i platform/admin views, potem catalog runtime albo stats dopiero w osobnych fazach.

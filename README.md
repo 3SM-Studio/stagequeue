@@ -276,7 +276,9 @@ POST /setup/claim-platform-owner
 - poprawnego `PLATFORM_SETUP_TOKEN` w body `{ "setupToken": "..." }`,
 - braku istniejacego aktywnego `platform_owner`.
 
-Po poprawnym claimie API ustawia domenowego usera jako `active` i zapisuje `platform_owner` w `platform_memberships`. Gdy pierwszy owner istnieje, setup jest zamkniety i kolejne claimy zwracaja `409 SETUP_ALREADY_COMPLETED`. Kolejni platform ownerzy maja byc dodawani pozniej przez platform ownera w UI platform members.
+Po poprawnym claimie API ustawia domenowego usera jako `active` i zapisuje `platform_owner` w `platform_memberships`. Gdy pierwszy owner istnieje, setup jest zamkniety i kolejne claimy zwracaja `409 SETUP_ALREADY_COMPLETED`. `/setup` jest one-time route: po `setupRequired=false` kieruje zalogowanego ownera do `/dashboard`, niezalogowanego usera do `/sign-in`, a zalogowanego usera bez dostepu do `/dashboard/access`. Kolejni platform ownerzy maja byc dodawani pozniej przez platform ownera w UI platform members.
+
+Dashboard respektuje ten stan jako globalny access gate. Dopoki `setupRequired=true`, route'y `/dashboard/*` kieruja do `/setup` zamiast pokazywac pending approval, bo nie istnieje jeszcze platform owner, ktory moglby zaakceptowac konto. Login uruchomiony z `/setup` uzywa Better Auth callbacku `/setup`, wiec po Google OAuth user wraca do formularza tokena.
 
 Do jednorazowego sprawdzenia runtime bez zostawiania serwera w terminalu:
 
@@ -498,14 +500,16 @@ Dashboard komunikuje sie wylacznie z Fastify API i nie dotyka bazy bezposrednio.
 D1 route'y:
 
 - `/` - przekierowanie do `/dashboard`,
-- `/login` - CTA logowania przez Google,
+- `/sign-in` - normalne logowanie przez Google z callbackiem `/dashboard`,
+- `/login` - kompatybilny alias przekierowujacy do `/sign-in`,
 - `/setup` - jednorazowy first-owner setup przez `PLATFORM_SETUP_TOKEN`,
 - `/dashboard` - odczyt `GET /me` i shell dostepu,
 - `/dashboard/access` - stan dostepu closed beta,
 - `/dashboard/organizations` - placeholder,
 - `/dashboard/venues` - placeholder,
-- `/dashboard/events` - wejscie manualne po eventId,
-- `/dashboard/events/:eventId/queue` - D2 operator queue MVP.
+- `/dashboard/events` - D3 wybor eventu z listy dostepnych wydarzen, z manualnym eventId tylko jako fallback QA/dev,
+- `/dashboard/events/new` - D5 minimalny formularz utworzenia wydarzenia,
+- `/dashboard/events/:eventId/queue` - D2 operator queue MVP oraz D4 event lifecycle controls.
 
 Login CTA nie jest zwyklym linkiem do endpointu auth. Dashboard uzywa Better Auth client flow:
 
@@ -516,20 +520,25 @@ authClient.signIn.social({
 })
 ```
 
+`GoogleSignInButton` nie ma juz callbacku zakodowanego na stale. `/setup` uzywa `callbackPath="/setup"`, a `/sign-in` uzywa `callbackPath="/dashboard"`.
+
 Lokalny Google OAuth setup wymaga `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` i `AUTH_SECRET` w API. Redirect URI w Google Console powinien wskazywac Better Auth callback API:
 
 ```txt
 http://localhost:4321/auth/callback/google
 ```
 
-Bez prawdziwych Google OAuth credentials lokalnie mozna zweryfikowac render i stan `authenticated=false`, ale nie nalezy raportowac pelnego OAuth smoke jako przechodzacego. `GET /me` nadal jest zrodlem prawdy dla stanow:
+Bez prawdziwych Google OAuth credentials lokalnie mozna zweryfikowac render i stan `authenticated=false`, ale nie nalezy raportowac pelnego OAuth smoke jako przechodzacego. Dashboard laczy `GET /setup/status` i `GET /me` w jeden gate:
 
-- `authenticated=false` - pokazuje CTA logowania,
-- `authenticated=true` i `dashboardAllowed=false` - pokazuje brak dostepu / pending closed beta,
+- `setupRequired=true` - `/dashboard/*` kieruje do `/setup`,
+- `setupRequired=false` i `authenticated=false` - `/dashboard/*` kieruje do `/sign-in`,
+- `setupRequired=false`, `authenticated=true` i `dashboardAllowed=false` - `/dashboard/*` kieruje do `/dashboard/access`,
 - `dashboardAllowed=true` - pokazuje shell z uzytkownikiem, rolami platformowymi i linkami do organizacji, lokali oraz wydarzen.
 
-D2 dodaje pierwszy panel operatora kolejki. Widok pobiera `GET /dashboard/events/:eventId/operator-queue`,
-laczymy go z `GET /dashboard/events/:eventId/stream` przez SSE i uzywa istniejacych endpointow mutacji:
+Pending approval / closed beta ma sens tylko po zakonczonym setupie pierwszego platform ownera. Jesli API albo setup status jest niedostepny, dashboard pokazuje system/API unavailable zamiast traktowac to jako wymagany setup.
+
+D2 dodaje pierwszy panel operatora kolejki. Widok pobiera `GET /dashboard/events/:eventId/operator-queue`
+i uzywa istniejacych endpointow mutacji:
 
 ```txt
 POST /dashboard/events/:eventId/requests/:requestId/approve
@@ -541,6 +550,35 @@ POST /dashboard/events/:eventId/requests/:requestId/move
 ```
 
 Panel pokazuje `pending`, `approved`, `now`, `done`, `rejected` i `skipped`. Nie dotyka DB bezposrednio i nie obchodzi permission layera API. Nadal nie zawiera pelnego CRUD organizacji/lokali/eventow, catalog runtime ani stats.
+
+MVP support access: aktywny `platform_owner` moze otwierac i obslugiwac dowolna operator queue oraz dashboard event stream. To swiadomy shortcut dla first ownera/supportu po `/setup`, zeby mozna bylo obsluzyc demo event bez osobnego staff assignment UI. Docelowo trzeba rozdzielic to na audytowany support access albo impersonation.
+
+D3 dodaje realny wybor eventu dla operatora. `/dashboard/events` pobiera `GET /dashboard/events` z Fastify API, pokazuje sekcje `Aktywne teraz`, `Nadchodzace / robocze` i `Zakonczone`, wyroznia eventy `active` oraz `paused`, a przy kazdym evencie pokazuje lokal, organizacje, status, widocznosc public join/queue oraz akcje `Otworz kolejke`. Operator nie musi znac UUID eventu jako glownego flow. Manualne otwieranie kolejki po ID zostaje na dole strony jako awaryjny fallback dla QA/dev.
+
+D4 dodaje kontrolki lifecycle na stronie `/dashboard/events/:eventId/queue`. Operator albo `platform_owner` moze z tego samego widoku kolejki wykonac akcje `Start`, `Pauza`, `Wznow`, `Zamknij`, `Archiwizuj` i `Anuluj` zgodnie z backendowym state machine. Ten panel uzywa Fastify API:
+
+```txt
+GET   /dashboard/events/:eventId
+PATCH /dashboard/events/:eventId
+POST  /dashboard/events/:eventId/start
+POST  /dashboard/events/:eventId/pause
+POST  /dashboard/events/:eventId/resume
+POST  /dashboard/events/:eventId/close
+POST  /dashboard/events/:eventId/archive
+POST  /dashboard/events/:eventId/cancel
+```
+
+Panel pozwala tez wlaczyc albo wylaczyc `publicJoinEnabled` i `publicQueueEnabled`. Public submit jest traktowany jako dostepny tylko dla eventu `active` z wlaczonym public join; public queue w dashboardowym modelu widocznosci jest traktowana jako live dla `active` albo `paused` z wlaczonym public queue. Backend i public API pozostaja zrodlem prawdy.
+
+D4.1 domyka lifecycle realtime coverage dla public join. Publiczny join page `/[venueSlug]/join` laczy sie z `GET /public/venues/:venueSlug/stream` i po `event.started`, `event.paused`, `event.resumed`, `event.closed`, `event.archived`, `event.cancelled` oraz `queue.updated` odswieza active-event state. Dzieki temu pauza/wznowienie blokuje albo przywraca formularz bez F5.
+
+D4.2/P0 utwardza lifecycle controls przed connection starvation i wiszacymi fetchami. Strona operator queue nie otwiera juz dashboard SSE jako krytycznego kanalu; lifecycle action wykonuje POST/PATCH z timeoutem, po sukcesie robi deterministyczny refetch event detail + operator queue, a przy bledzie zawsze odblokowuje przyciski. Lista `/dashboard/events` uzywa bezpiecznego refreshu po focus/visibility zamiast streamow per event. Public join i public queue nadal maja po jednym venue streamie na slug. Stabilnosc akcji operatora ma priorytet nad idealnym realtime listy.
+
+D4.4 dodaje safe refresh UX dla `/dashboard/events` bez EventSource per event. Lista ma reczny przycisk `Odswiez`, timestamp ostatniego odswiezenia, non-fatal error bez ukrywania starej listy, refresh po focus/visibility oraz polling co 15 sekund tylko dla widocznej karty z in-flight guardem. Operator actions dalej maja priorytet nad realtime listy. Jesli bedzie potrzebny prawdziwy realtime listy, follow-up to RT1: pojedynczy `/dashboard/events/stream` albo `/dashboard/stream`, nie stream per event.
+
+D4.5 domyka status propagation miedzy public join i dashboard operator queue bez wracania do agresywnego SSE. `/dashboard/events/:eventId/queue` ma reczny przycisk `Odswiez kolejke`, non-fatal blad refreshu, focus/visibility refresh oraz polling co 5 sekund tylko dla widocznej karty i tylko gdy nie trwa mutacja operatora. Public join sledzi status wlasnego zgloszenia przez `GET /public/venues/:venueSlug/my-requests`; endpoint uzywa cookie `pn_participant`, filtruje po hashu participant tokena, nie przyjmuje tokena w query/body i nie zwraca cudzych requestow ani plaintext tokena. Po approve/reject/start/done/skip komunikat na `/[venueSlug]/join` odswieza sie przez safe polling/focus refresh.
+
+D5 dodaje minimalny flow tworzenia wydarzenia bez pelnego CRUD. `/dashboard/events` ma akcje `Nowe wydarzenie`, a `/dashboard/events/new` pobiera `GET /dashboard/venues`, pokazuje wybor lokalu, nazwe, slug, status `draft|scheduled|active`, opcjonalne daty oraz flagi `publicJoinEnabled` i `publicQueueEnabled`. Submit uzywa `POST /dashboard/events` z `credentials: include` i po sukcesie kieruje do `/dashboard/events/:eventId/queue`. Platform owner ma MVP support/admin mozliwosc tworzenia eventu dla dostepnego lokalu, a konflikt sluga jest mapowany na kontrolowany `409 EVENT_SLUG_CONFLICT`. Seed demo nie jest juz jedynym sposobem posiadania eventu, ale pelny CRUD eventow/lokali/organizacji, staff assignment UI i tworzenie venue pozostaja odroczone.
 
 ### Dashboard operator queue local QA
 
@@ -558,10 +596,11 @@ Dashboard:
 
 ```txt
 http://localhost:3001/dashboard
+http://localhost:3001/dashboard/events
 http://localhost:3001/dashboard/events/<eventId>/queue
 ```
 
-Demo eventId znajdziesz w Postgresie:
+Podstawowy flow po D3 to wejscie na `/dashboard/events` i klikniecie `Otworz kolejke`. Demo eventId mozesz znalezc w Postgresie tylko do awaryjnego fallbacku QA/dev:
 
 ```sql
 select id, slug, status from events where slug = 'demo-karaoke';

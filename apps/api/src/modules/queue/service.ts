@@ -72,6 +72,16 @@ export type PublicQueueItem = {
   position?: number | null
 }
 
+export type PublicParticipantRequest = {
+  id: string
+  status: string
+  singerName: string
+  artist: string
+  title: string
+  position: number | null
+  createdAt: Date
+}
+
 export type OperatorQueueResponse = {
   event: {
     id: string
@@ -124,6 +134,7 @@ export type SubmitPublicRequestInput = {
 
 export type QueueService = {
   getPublicQueue(eventId: string): Promise<PublicQueueResponse>
+  listParticipantRequests(eventId: string, participantTokenHash: string): Promise<PublicParticipantRequest[]>
   submitPublicRequest(eventId: string, input: SubmitPublicRequestInput): Promise<QueueSongRequest>
   getOperatorQueue(eventId: string): Promise<OperatorQueueResponse>
   approveRequest(eventId: string, requestId: string, actorUserId: string): Promise<QueueSongRequest>
@@ -194,6 +205,17 @@ export function createQueueService(db: DbClient, eventBus?: DomainEventBus, anti
           enabled: context.event.status === "active" && context.event.publicJoinEnabled
         }
       }
+    },
+
+    async listParticipantRequests(eventId, participantTokenHash) {
+      await getEventContext(db, eventId)
+      const rows = await db
+        .select(songRequestSelection)
+        .from(songRequests)
+        .where(and(eq(songRequests.eventId, eventId), eq(songRequests.participantTokenHash, participantTokenHash)))
+        .orderBy(desc(songRequests.createdAt))
+
+      return rows.map(toPublicParticipantRequest)
     },
 
     async submitPublicRequest(eventId, input) {
@@ -716,6 +738,18 @@ function toPublicItem(request: QueueSongRequest): PublicQueueItem {
     songTitle: request.songTitle,
     songArtist: request.songArtist,
     position: request.position
+  }
+}
+
+function toPublicParticipantRequest(request: QueueSongRequest): PublicParticipantRequest {
+  return {
+    id: request.id,
+    status: request.status,
+    singerName: request.displayName,
+    artist: request.songArtist,
+    title: request.songTitle,
+    position: request.position,
+    createdAt: request.createdAt
   }
 }
 

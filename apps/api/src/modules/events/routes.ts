@@ -39,22 +39,24 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     if (!venueId) {
       throw new ApiHttpError(400, "BAD_REQUEST", "Missing venueId")
     }
-    if (!operatedByOrganizationId) {
-      throw new ApiHttpError(400, "BAD_REQUEST", "Missing operatedByOrganizationId")
-    }
 
     const isPlatformAllowed = await app.permissions.hasPlatformPermission(user.id, "platform.manage_venues")
     if (!isPlatformAllowed) {
+      if (!operatedByOrganizationId) {
+        throw new ApiHttpError(400, "BAD_REQUEST", "Missing operatedByOrganizationId")
+      }
       await app.permissions.requireVenuePermission(user.id, venueId, "venue.create_event")
     }
 
     const createInput: CreateEventInput = {
       venueId,
-      operatedByOrganizationId,
       createdByUserId: user.id,
       name: readRequiredString(body, "name", { maxLength: 160 }),
       slug: readSlug(body),
-      status: readEnum(body, "status", ["draft", "scheduled"], "draft")
+      status: readEnum(body, "status", ["draft", "scheduled", "active"], "draft")
+    }
+    if (operatedByOrganizationId !== undefined) {
+      createInput.operatedByOrganizationId = operatedByOrganizationId
     }
     const startsAt = readOptionalDateString(body, "startsAt")
     const endsAt = readOptionalDateString(body, "endsAt")
@@ -73,7 +75,11 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
       createInput.publicQueueEnabled = publicQueueEnabled
     }
 
-    const event = await app.events.createEvent(createInput)
+    const created = await app.events.createEvent(createInput)
+    const event = await app.events.getDashboardById(created.id)
+    if (!event) {
+      throw new ApiHttpError(404, "NOT_FOUND", "Missing event")
+    }
 
     reply.code(201)
     return { event }

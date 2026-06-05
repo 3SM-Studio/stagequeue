@@ -1,8 +1,7 @@
 import { cookies } from "next/headers"
 import Link from "next/link"
-import { GoogleSignInButton } from "../../components/GoogleSignInButton"
-import { getMe } from "../../lib/apiClient.ts"
-import { getDashboardViewState } from "../../lib/dashboardState.ts"
+import { redirect } from "next/navigation"
+import { getDashboardGateRedirect, readDashboardGate } from "../../lib/dashboardGate.ts"
 
 export const metadata = {
   title: "Dashboard"
@@ -10,37 +9,26 @@ export const metadata = {
 
 export default async function DashboardPage() {
   const cookieHeader = (await cookies()).toString()
-  const state = getDashboardViewState(await getMe({ cookieHeader }))
+  const state = await readDashboardGate({ cookieHeader })
+  const redirectTarget = getDashboardGateRedirect(state, "/dashboard")
 
-  if (state.kind === "unauthenticated") {
+  if (redirectTarget) {
+    redirect(redirectTarget)
+  }
+
+  if (state.kind === "api_unavailable") {
     return (
       <main className="page-shell narrow">
         <section className="panel">
           <h1>{state.title}</h1>
           <p className="lead">{state.message}</p>
-          <div className="actions">
-            <GoogleSignInButton />
-          </div>
         </section>
       </main>
     )
   }
 
-  if (state.kind === "access-denied") {
-    return (
-      <main className="page-shell narrow">
-        <section className="panel">
-          <h1>{state.title}</h1>
-          <p className="lead">{state.message}</p>
-          <p className="muted">Status dostepu: {state.reason}</p>
-          <div className="actions">
-            <Link className="button secondary" href="/dashboard/access">
-              Szczegoly dostepu
-            </Link>
-          </div>
-        </section>
-      </main>
-    )
+  if (state.kind !== "allowed") {
+    redirect("/sign-in")
   }
 
   return (

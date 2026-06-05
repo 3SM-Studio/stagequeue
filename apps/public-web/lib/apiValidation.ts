@@ -1,4 +1,13 @@
-import type { ActiveEventLookup, PublicEvent, PublicQueue, QueueItem, SubmitSongRequestResult, Venue } from "./apiClient.ts"
+import type {
+  ActiveEventLookup,
+  PublicEvent,
+  PublicMyRequest,
+  PublicMyRequestsResponse,
+  PublicQueue,
+  QueueItem,
+  SubmitSongRequestResult,
+  Venue
+} from "./apiClient.ts"
 
 type VenueResponse = {
   venue: Venue
@@ -62,6 +71,16 @@ export function assertSubmitRequestResponse(value: unknown): SubmitSongRequestRe
 
   return {
     request: value.request
+  }
+}
+
+export function assertMyRequestsResponse(value: unknown): PublicMyRequestsResponse {
+  if (!isRecord(value) || !Array.isArray(value.requests) || !value.requests.every(isMyRequest)) {
+    throw invalidResponse("my requests")
+  }
+
+  return {
+    requests: value.requests
   }
 }
 
@@ -143,11 +162,28 @@ function isSubmitRequest(value: unknown): value is SubmitSongRequestResult["requ
   )
 }
 
+function isMyRequest(value: unknown): value is PublicMyRequest {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isRequestStatus(value.status) &&
+    isString(value.singerName) &&
+    isString(value.artist) &&
+    isString(value.title) &&
+    (value.position === null || typeof value.position === "number") &&
+    isString(value.createdAt)
+  )
+}
+
 function isEventStatus(value: unknown): value is PublicEvent["status"] {
   return (
     isString(value) &&
     ["active", "paused", "draft", "scheduled", "closed", "archived", "cancelled"].includes(value)
   )
+}
+
+function isRequestStatus(value: unknown): value is PublicMyRequest["status"] {
+  return isString(value) && ["pending", "approved", "now", "done", "rejected", "skipped"].includes(value)
 }
 
 function isNullableString(value: unknown): value is string | null {

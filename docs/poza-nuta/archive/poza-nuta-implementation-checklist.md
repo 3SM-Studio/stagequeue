@@ -19,7 +19,7 @@
 | Phase 9 — Queue in Postgres | DONE | Public/operator queue, transactions, `queue_events`. |
 | Phase 10 — SSE | DONE | Public/dashboard streams, in-memory bus. |
 | Phase 11 — Public web | DONE/PARTIAL | Public MVP działa; hardening P0/P1 wymagany. |
-| Phase 12 — Dashboard web | PARTIAL | D1 shell foundation i D2 operator queue MVP działają; CRUD/platform UI nadal TODO. |
+| Phase 12 — Dashboard web | PARTIAL | D1 shell foundation, D2 operator queue MVP, D3 event selection MVP, D4 event lifecycle controls, D4.5 request status propagation i D5 minimal event creation działają; pełny CRUD/platform UI nadal TODO. |
 | Phase 13 — Global catalog runtime | TODO | Import iSing/KaraFun do DB, jobs, logs. |
 | Phase 14 — Stats | TODO | Liczyć z `queue_events`. |
 | Phase 15 — CI/CD | TODO | GitHub Actions, Vercel/Railway/Supabase. |
@@ -165,12 +165,15 @@ Kryterium gotowości:
 ### Zakres minimalny
 
 - [x] Next.js App Router w `apps/dashboard-web`.
-- [x] `/login`.
+- [x] `/sign-in` jako normalny login flow.
+- [x] `/login` jako kompatybilny alias do `/sign-in`.
 - [x] `/dashboard/access` jako D1 access state.
 - [x] `/dashboard/organizations` placeholder.
 - [x] `/dashboard/venues` placeholder.
-- [x] `/dashboard/events` manual eventId entry.
-- [x] `/dashboard/events/[eventId]/queue` operator queue MVP.
+- [x] `/dashboard/events` D3 event selection MVP.
+- [x] `/dashboard/events/new` D5 minimal event creation.
+- [x] Manual eventId entry zostaje tylko jako fallback QA/dev.
+- [x] `/dashboard/events/[eventId]/queue` operator queue MVP + D4 event lifecycle controls.
 - [ ] `/platform/access-requests`.
 - [ ] `/platform/organizations`.
 - [ ] `/platform/venues`.
@@ -189,6 +192,11 @@ Kryterium gotowości:
 - [x] `/setup` pozwala jednorazowo nadać pierwszego `platform_owner` przez `PLATFORM_SETUP_TOKEN`.
 - [x] `GET /setup/status` nie leakuję userów ani emaili, zwraca tylko `setupRequired`.
 - [x] `POST /setup/claim-platform-owner` wymaga zalogowanej sesji Better Auth i tokena.
+- [x] Login z `/setup` wraca po Google OAuth do `/setup`, a nie do `/dashboard`.
+- [x] `setupRequired=true` kieruje `/dashboard/*` do `/setup`.
+- [x] `setupRequired=false` sprawia, ze `/setup` redirectuje do `/dashboard`, `/sign-in` albo `/dashboard/access` i nie pokazuje token form.
+- [x] Pending approval / closed beta pokazuje się tylko po `setupRequired=false`.
+- [x] API/setup status unavailable pokazuje stan unavailable, a nie fałszywy setup-required.
 - [x] `BOOTSTRAP_PLATFORM_OWNER_EMAIL` zostaje oznaczony jako legacy/dev fallback.
 
 ### D1 foundation — DONE
@@ -203,14 +211,84 @@ Kryterium gotowości:
 
 ### Operator queue
 
+- [x] `/dashboard/events` pobiera `GET /dashboard/events` i pokazuje operatorowi dostepne eventy.
+- [x] Eventy sa grupowane w `Aktywne teraz`, `Nadchodzace / robocze` i `Zakonczone`.
+- [x] Eventy `active` i `paused` sa wyroznione jako glowne operacyjne wejscie do kolejki.
+- [x] Operator nie musi znac event UUID jako glownego flow; `Otworz kolejke` prowadzi do `/dashboard/events/:eventId/queue`.
+- [x] Manualne otwieranie po ID jest opisane jako awaryjny fallback QA/dev.
 - [x] Pobiera `GET /dashboard/events/:eventId/operator-queue`.
 - [x] Pokazuje pending/approved/now/done/rejected/skipped.
 - [x] Obsługuje approve/reject/start/done/skip/move.
-- [x] Podłącza `GET /dashboard/events/:eventId/stream`.
-- [x] Po `queue.updated`, `request.*`, `event.*` robi refetch.
-- [x] Nie używać polling jako głównego mechanizmu.
+- [x] Nie uzywa dashboard SSE jako krytycznego kanalu dla operator actions.
+- [x] Po mutacjach robi deterministyczny refetch event detail + operator queue.
+- [x] Nie uzywa polling jako glownego mechanizmu dla operator queue actions.
 - [x] `401` pokazuje login CTA, `403` pokazuje brak uprawnień, `409` pokazuje konflikt kolejki.
 - [x] Dashboard queue page komunikuje się wyłącznie z Fastify API i używa `credentials: include`.
+
+- [x] MVP support access: aktywny `platform_owner` moze obslugiwac dowolna operator queue i dashboard event stream. Docelowo rozdzielic na audytowany support access albo impersonation.
+
+### Event lifecycle controls
+
+- [x] `/dashboard/events/:eventId/queue` pobiera `GET /dashboard/events/:eventId` dla statusu eventu.
+- [x] UI pokazuje panel `Wydarzenie` ze statusem, lokalem oraz flagami public join/queue.
+- [x] Lifecycle actions uzywaja istniejacych endpointow `POST /dashboard/events/:eventId/start|pause|resume|close|archive|cancel`.
+- [x] Dostepne akcje sa modelowane centralnie: `draft/scheduled -> start,cancel`, `active -> pause,close`, `paused -> resume,close`, `closed/cancelled -> archive`, `archived -> brak akcji`.
+- [x] Public join/queue flag controls uzywaja `PATCH /dashboard/events/:eventId`.
+- [x] Po lifecycle action albo flag update UI robi deterministyczny refetch eventu i operator queue.
+- [x] `403` i `409` sa mapowane na czytelne stany UI.
+
+### D4.1 lifecycle realtime coverage
+
+- [x] `/[venueSlug]/join` uzywa venue-first SSE `GET /public/venues/:venueSlug/stream`.
+- [x] Public join refetchuje active-event state po `event.started`, `event.paused`, `event.resumed`, `event.closed`, `event.archived`, `event.cancelled` i `queue.updated`.
+- [x] Pause/resume eventu blokuje albo przywraca public join form bez F5.
+- [x] `/dashboard/events` ma bezpieczny fallback refresh po focus/visibility.
+- [x] EventSource error jest stanem nie-fatalnym i nie crashuje UI.
+
+### D4.2/P0 SSE connection starvation and hanging mutation fix
+
+- [x] Operator queue page nie uzywa dashboard SSE jako krytycznego kanalu dla lifecycle controls.
+- [x] Mutacje lifecycle/flags/queue maja AbortController timeout i czytelny timeout error.
+- [x] Pending action jest czyszczony w `finally` po sukcesie, bledzie i timeout.
+- [x] Public join i public queue utrzymuja maksymalnie jeden venue stream dla `venueSlug`.
+- [x] `/dashboard/events` nie otwiera streamow per event w krytycznym flow; uzywa refreshu po focus/visibility.
+- [x] Lifecycle mutation nie czeka na SSE: wykonuje POST/PATCH, potem deterministyczny refetch event detail + operator queue.
+
+### D4.4 safe refresh UX for dashboard events
+
+- [x] `/dashboard/events` nie tworzy EventSource per event.
+- [x] Ma reczny przycisk `Odswiez`.
+- [x] Pokazuje timestamp ostatniego odswiezenia.
+- [x] Polling dziala co 15 sekund tylko gdy karta jest widoczna.
+- [x] Focus/visibility refresh uzywa in-flight guardu.
+- [x] Blad refreshu jest non-fatal i zostawia poprzednia liste widoczna.
+- [ ] RT1: rozwazyc pojedynczy `/dashboard/events/stream` albo `/dashboard/stream` zamiast streamow per event.
+
+### D4.5 request status propagation
+
+- [x] `/dashboard/events/:eventId/queue` ma reczny przycisk `Odswiez kolejke`.
+- [x] Operator queue robi safe refresh co 5 sekund tylko dla widocznej karty.
+- [x] Operator queue odswieza sie po focus/visibility i uzywa in-flight guardu.
+- [x] Auto-refresh operator queue nie startuje, gdy trwa mutation pending.
+- [x] Failed refresh operator queue jest non-fatal i zostawia poprzedni snapshot widoczny.
+- [x] Dodano `GET /public/venues/:venueSlug/my-requests`.
+- [x] `my-requests` uzywa cookie `pn_participant`, filtruje po hashu tokena i nie przyjmuje tokena w query/body.
+- [x] Public join sledzi wlasny request po submit i mapuje statusy `pending`, `approved`, `now`, `done`, `rejected`, `skipped` na komunikaty uczestnika.
+- [x] Public join uzywa safe polling/focus refresh jako stabilnego fallbacku po problemach z nadmiarowym SSE.
+
+### D5 minimal event creation
+
+- [x] `/dashboard/events` ma akcje `Nowe wydarzenie`.
+- [x] `/dashboard/events/new` pobiera `GET /dashboard/venues`.
+- [x] Formularz tworzenia ma lokal, nazwe, slug, status `draft|scheduled|active`, opcjonalne daty oraz `publicJoinEnabled`/`publicQueueEnabled`.
+- [x] `createDashboardEvent` uzywa `POST /dashboard/events`, `credentials: include` i timeoutu mutacji.
+- [x] Po sukcesie dashboard redirectuje do `/dashboard/events/:eventId/queue`.
+- [x] `POST /dashboard/events` zwraca event z kontekstem `venue` i `operatedByOrganization`.
+- [x] `platform_owner` moze tworzyc event jako MVP support/admin.
+- [x] Duplicate slug jest mapowany na kontrolowany `409 EVENT_SLUG_CONFLICT`.
+- [ ] Pelny CRUD eventow/lokali/organizacji.
+- [ ] Staff assignment UI.
+- [ ] Tworzenie venue z dashboardu.
 
 ### Platform minimal
 

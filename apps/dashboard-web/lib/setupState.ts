@@ -2,6 +2,13 @@ import type { DashboardMeResponse, PlatformSetupStatusResponse } from "./apiClie
 
 export type PlatformSetupViewState =
   | {
+      kind: "unavailable"
+      title: string
+      message: string
+      showClaimForm: false
+      showGoogleSignIn: false
+    }
+  | {
       kind: "completed"
       title: string
       message: string
@@ -23,6 +30,32 @@ export type PlatformSetupViewState =
       showClaimForm: true
       showGoogleSignIn: false
     }
+
+export function getPlatformSetupRedirect(status: PlatformSetupStatusResponse, me: DashboardMeResponse): string | null {
+  if (status.setupRequired) {
+    return null
+  }
+
+  if (!me.authenticated) {
+    return "/sign-in"
+  }
+
+  if (!me.access.dashboardAllowed) {
+    return "/dashboard/access"
+  }
+
+  return "/dashboard"
+}
+
+export function getPlatformSetupUnavailableState(): PlatformSetupViewState {
+  return {
+    kind: "unavailable",
+    title: "Setup chwilowo niedostepny",
+    message: "Nie udalo sie sprawdzic stanu setupu. Sprawdz, czy API dziala.",
+    showClaimForm: false,
+    showGoogleSignIn: false
+  }
+}
 
 export function getPlatformSetupViewState(
   status: PlatformSetupStatusResponse,

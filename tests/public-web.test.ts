@@ -5,18 +5,35 @@ import {
   buildPublicApiUrl,
   buildPublicVenueStreamUrl,
   getBrowserApiBaseUrl,
+  getMyRequestsByVenueSlug,
   getPublicQueueByVenueSlug,
+  type PublicMyRequest,
   submitSongRequestByVenueSlug
 } from "../apps/public-web/lib/apiClient.ts"
 import { getJoinVisibility } from "../apps/public-web/lib/joinVisibility.ts"
+import {
+  getPublicJoinStreamErrorState,
+  getPublicVenueStreamKey,
+  getPublicJoinViewState,
+  shouldRefetchPublicJoinOnSse
+} from "../apps/public-web/lib/joinState.ts"
 import { joinPageMetadata, noindexMetadata, queuePageMetadata, venuePageMetadata } from "../apps/public-web/lib/metadata.ts"
+import {
+  createMyRequestsRefreshController,
+  getMyRequestStatusMessage,
+  getTrackedRequest,
+  PUBLIC_MY_REQUESTS_REFRESH_INTERVAL_MS,
+  shouldPollMyRequests
+} from "../apps/public-web/lib/myRequestsState.ts"
 import { getVenueMetadataData, getVenuePageData } from "../apps/public-web/lib/pageData.ts"
 import { shouldRefetchQueue } from "../apps/public-web/lib/queueRefresh.ts"
+import { createRefetchScheduler as createPublicRefetchScheduler } from "../apps/public-web/lib/refetchScheduler.ts"
 import { getServerApiBaseUrl, getServerPublicQueueByVenueSlug } from "../apps/public-web/lib/serverApiClient.ts"
 import { isReservedPublicPathSlug } from "../apps/public-web/lib/staticSlugGuard.ts"
 import { validateSubmitSongRequest } from "../apps/public-web/lib/submitValidation.ts"
 import {
   assertActiveEventResponse,
+  assertMyRequestsResponse,
   assertPublicQueueResponse,
   assertSubmitRequestResponse,
   assertVenueResponse
@@ -219,6 +236,27 @@ test("public-web join flow submits venue-first request without eventId", async (
   }
 })
 
+test("public-web my-requests client uses venue-first URL and credentials include", async () => {
+  const previousFetch = globalThis.fetch
+  let requestedUrl = ""
+  let requestedCredentials: RequestCredentials | undefined
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input)
+    requestedCredentials = init?.credentials
+    return jsonResponse(validMyRequestsResponse("pending"))
+  }
+
+  try {
+    const result = await getMyRequestsByVenueSlug("klub-x")
+
+    assert.equal(result.requests[0]?.status, "pending")
+    assert.equal(requestedUrl.endsWith("/public/venues/klub-x/my-requests"), true)
+    assert.equal(requestedCredentials, "include")
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
 test("public-web validates submit request API responses", () => {
   assert.equal(assertSubmitRequestResponse(validSubmitResponse()).request.status, "pending")
   assert.throws(
@@ -227,10 +265,68 @@ test("public-web validates submit request API responses", () => {
   )
 })
 
+test("public-web validates my-requests API responses", () => {
+  assert.equal(assertMyRequestsResponse(validMyRequestsResponse("approved")).requests[0]?.status, "approved")
+  assert.throws(
+    () => assertMyRequestsResponse({ requests: [{ id: "request-1", status: "approved" }] }),
+    /Invalid public API response: my requests/
+  )
+})
+
 test("public-web queue refetch helper reacts to queue.updated", () => {
   assert.equal(shouldRefetchQueue("queue.updated"), true)
   assert.equal(shouldRefetchQueue("request.approved"), true)
   assert.equal(shouldRefetchQueue("connected"), false)
+})
+
+test("public-web join refetch helper reacts to lifecycle and queue events", () => {
+  for (const eventType of [
+    "event.started",
+    "event.paused",
+    "event.resumed",
+    "event.closed",
+    "event.archived",
+    "event.cancelled",
+    "queue.updated"
+  ]) {
+    assert.equal(shouldRefetchPublicJoinOnSse(eventType), true)
+  }
+
+  assert.equal(shouldRefetchPublicJoinOnSse("request.approved"), false)
+  assert.equal(shouldRefetchPublicJoinOnSse("connected"), false)
+})
+
+test("public-web venue stream key is stable and deduplicates same slug", () => {
+  assert.equal(getPublicVenueStreamKey("demo-klub"), "public-venue:demo-klub")
+  assert.equal(getPublicVenueStreamKey("demo-klub"), getPublicVenueStreamKey("demo-klub"))
+})
+
+test("public-web refetch scheduler coalesces burst lifecycle events", async () => {
+  const timers: Array<() => void> = []
+  let refetchCount = 0
+  const scheduler = createPublicRefetchScheduler(
+    async () => {
+      refetchCount += 1
+    },
+    {
+      setTimeoutFn: (callback) => {
+        timers.push(callback)
+        return timers.length
+      },
+      clearTimeoutFn: () => undefined
+    }
+  )
+
+  scheduler.schedule()
+  scheduler.schedule()
+  scheduler.schedule()
+  assert.equal(timers.length, 1)
+
+  timers[0]?.()
+  await Promise.resolve()
+
+  assert.equal(refetchCount, 1)
+  scheduler.cancel()
 })
 
 test("public-web submit validation requires singer and song fields", () => {
@@ -296,6 +392,101 @@ test("public-web join page policy does not open the form for paused events", () 
   })
 
   assert.equal(visibility.kind, "paused")
+})
+
+test("public-web join view state disables submit for paused active event", () => {
+  const state = getPublicJoinViewState(activeEventLookup({ status: "paused", publicJoinEnabled: true }))
+
+  assert.equal(state.kind, "paused")
+})
+
+test("public-web join view state enables submit for resumed active event", () => {
+  const state = getPublicJoinViewState(activeEventLookup({ status: "active", publicJoinEnabled: true }))
+
+  assert.equal(state.kind, "open")
+})
+
+test("public-web join view state maps no active event to inactive", () => {
+  const state = getPublicJoinViewState({
+    venue: validActiveEventResponse().venue,
+    activeEvent: null
+  })
+
+  assert.equal(state.kind, "inactive")
+})
+
+test("public-web join stream errors are non-fatal", () => {
+  const state = getPublicJoinStreamErrorState()
+
+  assert.equal(state.kind, "stale")
+  assert.equal(state.fatal, false)
+})
+
+test("public-web my request statuses map to participant-facing messages", () => {
+  assert.match(getMyRequestStatusMessage("pending"), /Poczekaj/)
+  assert.match(getMyRequestStatusMessage("approved"), /zatwierdzone/)
+  assert.match(getMyRequestStatusMessage("now"), /Teraz/)
+  assert.match(getMyRequestStatusMessage("rejected"), /odrzucone/)
+  assert.match(getMyRequestStatusMessage("skipped"), /pominiete/)
+  assert.match(getMyRequestStatusMessage("done"), /zakonczony/)
+})
+
+test("public-web tracked request helper finds own request and handles missing cookie state", () => {
+  assert.deepEqual(getTrackedRequest([myRequest("pending")], "request-1"), myRequest("pending"))
+  assert.equal(getTrackedRequest([myRequest("pending")], "other-request"), null)
+  assert.equal(getTrackedRequest([myRequest("pending")], null), null)
+  assert.equal(getTrackedRequest([], "request-1"), null)
+})
+
+test("public-web my-requests polling runs only while there is an active tracked request", () => {
+  assert.equal(PUBLIC_MY_REQUESTS_REFRESH_INTERVAL_MS, 5000)
+  assert.equal(shouldPollMyRequests(myRequest("pending"), "visible"), true)
+  assert.equal(shouldPollMyRequests(myRequest("approved"), "visible"), true)
+  assert.equal(shouldPollMyRequests(myRequest("now"), "visible"), true)
+  assert.equal(shouldPollMyRequests(myRequest("done"), "visible"), false)
+  assert.equal(shouldPollMyRequests(myRequest("rejected"), "visible"), false)
+  assert.equal(shouldPollMyRequests(myRequest("pending"), "hidden"), false)
+  assert.equal(shouldPollMyRequests(null, "visible"), false)
+})
+
+test("public-web my-requests refresh controller blocks overlapping refreshes", async () => {
+  let calls = 0
+  let resolveFetch: (requests: PublicMyRequest[]) => void = () => undefined
+  const controller = createMyRequestsRefreshController({
+    fetchRequests: async () => {
+      calls += 1
+      return await new Promise<PublicMyRequest[]>((resolve) => {
+        resolveFetch = resolve
+      })
+    },
+    trackedRequestId: "request-1"
+  })
+
+  const first = controller.refresh()
+  const second = controller.refresh()
+
+  assert.equal(calls, 1)
+  assert.strictEqual(first, second)
+
+  resolveFetch([myRequest("approved")])
+  const request = await first
+
+  assert.equal(request?.status, "approved")
+  assert.equal(controller.getError(), null)
+})
+
+test("public-web my-requests refresh controller is non-fatal on fetch errors", async () => {
+  const controller = createMyRequestsRefreshController({
+    fetchRequests: async () => {
+      throw new Error("stream disconnected")
+    },
+    trackedRequestId: "request-1"
+  })
+
+  const request = await controller.refresh()
+
+  assert.equal(request, null)
+  assert.match(controller.getError() ?? "", /odswiezyc/)
 })
 
 test("public-web noindex metadata is available for join and queue pages", () => {
@@ -384,6 +575,17 @@ function validActiveEventResponse() {
   }
 }
 
+function activeEventLookup(overrides: Partial<NonNullable<ReturnType<typeof validActiveEventResponse>["activeEvent"]>> = {}) {
+  const response = validActiveEventResponse()
+  return {
+    ...response,
+    activeEvent: {
+      ...response.activeEvent,
+      ...overrides
+    }
+  }
+}
+
 function validPublicQueueResponse() {
   return {
     event: {
@@ -441,6 +643,25 @@ function validSubmitResponse() {
       sourceId: "ising",
       sourceTrackId: "9053"
     }
+  }
+}
+
+function validMyRequestsResponse(status: PublicMyRequest["status"] = "pending") {
+  return {
+    requests: [myRequest(status)]
+  }
+}
+
+function myRequest(status: PublicMyRequest["status"], overrides: Partial<PublicMyRequest> = {}): PublicMyRequest {
+  return {
+    id: "request-1",
+    status,
+    singerName: "Michal",
+    artist: "ABBA",
+    title: "Dancing Queen",
+    position: status === "approved" ? 1 : null,
+    createdAt: "2026-06-05T12:00:00.000Z",
+    ...overrides
   }
 }
 

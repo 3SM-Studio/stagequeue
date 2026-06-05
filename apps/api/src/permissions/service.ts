@@ -67,6 +67,11 @@ export function createPermissionService(repository: PermissionRepository): Permi
     return memberships.some((membership) => isActive(membership.status) && hasPlatformRolePermission(membership.role, permission))
   }
 
+  async function hasPlatformOwnerSupportAccess(userId: string): Promise<boolean> {
+    const memberships = await repository.getPlatformMemberships(userId)
+    return memberships.some((membership) => isActive(membership.status) && membership.role === "platform_owner")
+  }
+
   async function hasOrganizationPermission(
     userId: string,
     organizationId: string,
@@ -83,7 +88,15 @@ export function createPermissionService(repository: PermissionRepository): Permi
 
   async function hasEventPermission(userId: string, eventId: string, permission: VenueEventPermission): Promise<boolean> {
     const context = await repository.getEventPermissionContext(userId, eventId)
-    if (!context.event || !context.organizationMembership || !isActive(context.organizationMembership.status)) {
+    if (!context.event) {
+      return false
+    }
+
+    if (isEventScopedPermission(permission) && (await hasPlatformOwnerSupportAccess(userId))) {
+      return true
+    }
+
+    if (!context.organizationMembership || !isActive(context.organizationMembership.status)) {
       return false
     }
 
@@ -231,4 +244,8 @@ function requirePermission<TArgs extends unknown[]>(
 
 function isActive(status: string): boolean {
   return status === "active"
+}
+
+function isEventScopedPermission(permission: VenueEventPermission): boolean {
+  return permission.startsWith("event.")
 }

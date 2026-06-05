@@ -3,6 +3,7 @@ import {
   eventStaffRoles,
   eventStatuses,
   events,
+  organizations,
   organizationMemberships,
   queueEvents,
   venueOrganizationAccess,
@@ -29,6 +30,19 @@ export type EventSummary = {
   publicQueueEnabled: boolean
 }
 
+export type DashboardEventSummary = EventSummary & {
+  venue: {
+    id: string
+    name: string
+    slug: string
+  }
+  operatedByOrganization: {
+    id: string
+    name: string
+    slug: string
+  }
+}
+
 export type EventStaffAssignmentSummary = {
   id: string
   eventId: string
@@ -51,11 +65,11 @@ export type PublicActiveEventLookup = {
 
 export type CreateEventInput = {
   venueId: string
-  operatedByOrganizationId: string
+  operatedByOrganizationId?: string
   createdByUserId: string
   name: string
   slug: string
-  status: Extract<EventStatus, "draft" | "scheduled">
+  status: Extract<EventStatus, "draft" | "scheduled" | "active">
   startsAt?: string
   endsAt?: string
   publicJoinEnabled?: boolean
@@ -86,8 +100,9 @@ export type PatchEventStaffInput = {
 export type LifecycleAction = "start" | "pause" | "resume" | "close" | "archive" | "cancel"
 
 export type EventsService = {
-  listForUser(userId: string, options?: { includeAll?: boolean }): Promise<EventSummary[]>
+  listForUser(userId: string, options?: { includeAll?: boolean }): Promise<DashboardEventSummary[]>
   getById(eventId: string): Promise<EventSummary | null>
+  getDashboardById(eventId: string): Promise<DashboardEventSummary | null>
   createEvent(input: CreateEventInput): Promise<EventSummary>
   patchEvent(eventId: string, input: PatchEventInput): Promise<EventSummary>
   changeLifecycle(eventId: string, action: LifecycleAction, actorUserId: string): Promise<EventSummary>
@@ -117,11 +132,16 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
   return {
     async listForUser(userId, options = {}) {
       if (options.includeAll) {
-        return db.select(eventSelection).from(events)
+        const rows = await db
+          .select(dashboardEventSelection)
+          .from(events)
+          .innerJoin(venues, eq(events.venueId, venues.id))
+          .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+        return uniqueDashboardEvents(rows.map(mapDashboardEventRow))
       }
 
-      return db
-        .select(eventSelection)
+      const rows = await db
+        .select(dashboardEventSelection)
         .from(organizationMemberships)
         .innerJoin(
           venueOrganizationAccess,
@@ -137,7 +157,11 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
             eq(events.operatedByOrganizationId, organizationMemberships.organizationId)
           )
         )
+        .innerJoin(venues, eq(events.venueId, venues.id))
+        .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
         .where(and(eq(organizationMemberships.userId, userId), eq(organizationMemberships.status, "active")))
+
+      return uniqueDashboardEvents(rows.map(mapDashboardEventRow))
     },
 
     async getById(eventId) {
@@ -145,26 +169,46 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
       return rows[0] ?? null
     },
 
+    async getDashboardById(eventId) {
+      const rows = await db
+        .select(dashboardEventSelection)
+        .from(events)
+        .innerJoin(venues, eq(events.venueId, venues.id))
+        .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+        .where(eq(events.id, eventId))
+        .limit(1)
+
+      return rows[0] ? mapDashboardEventRow(rows[0]) : null
+    },
+
     async createEvent(input) {
-      if (!(await this.organizationHasActiveVenueAccess(input.operatedByOrganizationId, input.venueId))) {
+      const operatedByOrganizationId =
+        input.operatedByOrganizationId ?? (await resolveDefaultOrganizationForVenue(db, input.venueId))
+      if (!operatedByOrganizationId) {
+        throw new ApiHttpError(400, "BAD_REQUEST", "Missing operatedByOrganizationId")
+      }
+      if (!(await this.organizationHasActiveVenueAccess(operatedByOrganizationId, input.venueId))) {
         throw new ApiHttpError(403, "FORBIDDEN", "Organization does not have active access to this venue")
       }
+      validateEventDates(input.startsAt, input.endsAt)
 
-      const rows = await db
-        .insert(events)
-        .values({
-          venueId: input.venueId,
-          operatedByOrganizationId: input.operatedByOrganizationId,
-          createdByUserId: input.createdByUserId,
-          name: input.name,
-          slug: input.slug,
-          status: input.status,
-          startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
-          endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
-          publicJoinEnabled: input.publicJoinEnabled ?? true,
-          publicQueueEnabled: input.publicQueueEnabled ?? true
-        })
-        .returning(eventSelection)
+      const rows = await mapCreateEventError(async () =>
+        db
+          .insert(events)
+          .values({
+            venueId: input.venueId,
+            operatedByOrganizationId,
+            createdByUserId: input.createdByUserId,
+            name: input.name,
+            slug: input.slug,
+            status: input.status,
+            startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
+            endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
+            publicJoinEnabled: input.publicJoinEnabled ?? false,
+            publicQueueEnabled: input.publicQueueEnabled ?? false
+          })
+          .returning(eventSelection)
+      )
 
       if (!rows[0]) {
         throw new Error("Failed to create event")
@@ -175,6 +219,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
 
     async patchEvent(eventId, input) {
       const update: Partial<typeof events.$inferInsert> = {}
+      validateEventDates(input.startsAt, input.endsAt)
       if (input.name !== undefined) {
         update.name = input.name
       }
@@ -438,6 +483,60 @@ async function venueHasRunningEvent(db: DbClient, venueId: string, exceptEventId
   return rows.length > 0
 }
 
+async function resolveDefaultOrganizationForVenue(db: DbClient, venueId: string): Promise<string | null> {
+  const rows = await db
+    .select({ organizationId: venueOrganizationAccess.organizationId })
+    .from(venueOrganizationAccess)
+    .where(and(eq(venueOrganizationAccess.venueId, venueId), eq(venueOrganizationAccess.status, "active")))
+    .limit(1)
+
+  return rows[0]?.organizationId ?? null
+}
+
+function validateEventDates(startsAt: string | undefined, endsAt: string | undefined): void {
+  if (!startsAt || !endsAt) {
+    return
+  }
+
+  if (Date.parse(endsAt) <= Date.parse(startsAt)) {
+    throw new ApiHttpError(400, "BAD_REQUEST", "endsAt must be after startsAt")
+  }
+}
+
+async function mapCreateEventError<T>(action: () => Promise<T>): Promise<T> {
+  try {
+    return await action()
+  } catch (error) {
+    throw mapEventCreateError(error)
+  }
+}
+
+export function mapEventCreateError(error: unknown): unknown {
+  if (isPgUniqueViolation(error)) {
+    if (error.constraint === "events_venue_slug_unique") {
+      return new ApiHttpError(409, "EVENT_SLUG_CONFLICT", "Event slug already exists for this venue")
+    }
+    if (error.constraint === "events_one_active_or_paused_per_venue_unique") {
+      return new ApiHttpError(409, "VENUE_HAS_ACTIVE_EVENT", "Venue already has an active or paused event")
+    }
+  }
+
+  return error
+}
+
+type PgUniqueViolation = {
+  code: "23505"
+  constraint?: string
+}
+
+function isPgUniqueViolation(error: unknown): error is PgUniqueViolation {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "23505"
+  )
+}
+
 async function getStaffAssignmentById(
   db: DbClient,
   assignmentId: string
@@ -463,6 +562,51 @@ const eventSelection = {
   endsAt: events.endsAt,
   publicJoinEnabled: events.publicJoinEnabled,
   publicQueueEnabled: events.publicQueueEnabled
+}
+
+const dashboardEventSelection = {
+  ...eventSelection,
+  venueName: venues.name,
+  venueSlug: venues.slug,
+  organizationName: organizations.name,
+  organizationSlug: organizations.slug
+}
+
+type DashboardEventRow = EventSummary & {
+  venueName: string
+  venueSlug: string
+  organizationName: string
+  organizationSlug: string
+}
+
+function mapDashboardEventRow(row: DashboardEventRow): DashboardEventSummary {
+  return {
+    id: row.id,
+    venueId: row.venueId,
+    operatedByOrganizationId: row.operatedByOrganizationId,
+    createdByUserId: row.createdByUserId,
+    name: row.name,
+    slug: row.slug,
+    status: row.status,
+    startsAt: row.startsAt,
+    endsAt: row.endsAt,
+    publicJoinEnabled: row.publicJoinEnabled,
+    publicQueueEnabled: row.publicQueueEnabled,
+    venue: {
+      id: row.venueId,
+      name: row.venueName,
+      slug: row.venueSlug
+    },
+    operatedByOrganization: {
+      id: row.operatedByOrganizationId,
+      name: row.organizationName,
+      slug: row.organizationSlug
+    }
+  }
+}
+
+function uniqueDashboardEvents(eventsList: DashboardEventSummary[]): DashboardEventSummary[] {
+  return [...new Map(eventsList.map((event) => [event.id, event])).values()]
 }
 
 const staffSelection = {

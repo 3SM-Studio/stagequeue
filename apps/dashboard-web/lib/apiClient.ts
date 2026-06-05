@@ -1,5 +1,7 @@
 export const DEFAULT_DASHBOARD_API_URL = "http://localhost:4321"
 export const DEFAULT_DASHBOARD_WEB_URL = "http://localhost:3001"
+export const DASHBOARD_MUTATION_TIMEOUT_MS = 10000
+export const DASHBOARD_MUTATION_TIMEOUT_MESSAGE = "Nie udalo sie zmienic statusu wydarzenia. Sprobuj ponownie."
 
 export type DashboardAccessReason = "unauthenticated" | "pending_approval" | "disabled" | "active_user" | "platform_role"
 
@@ -67,6 +69,78 @@ export type QueueActionResponse = {
   request: OperatorQueueItem
 }
 
+export type DashboardEventStatus = "draft" | "scheduled" | "active" | "paused" | "closed" | "archived" | "cancelled"
+
+export type DashboardEventSummary = {
+  id: string
+  name: string
+  slug: string
+  status: DashboardEventStatus
+  startsAt: string | null
+  endsAt: string | null
+  publicJoinEnabled: boolean
+  publicQueueEnabled: boolean
+  venue: {
+    id: string
+    name: string
+    slug: string
+  }
+  operatedByOrganization: {
+    id: string
+    name: string
+    slug: string
+  }
+}
+
+export type DashboardVenueSummary = {
+  id: string
+  name: string
+  slug: string
+  status?: string
+  verificationStatus?: string
+}
+
+export type DashboardEventDetail = {
+  id: string
+  venueId: string
+  operatedByOrganizationId: string
+  createdByUserId: string | null
+  name: string
+  slug: string
+  status: DashboardEventStatus
+  startsAt: string | null
+  endsAt: string | null
+  publicJoinEnabled: boolean
+  publicQueueEnabled: boolean
+}
+
+export type DashboardEventsResponse = {
+  events: DashboardEventSummary[]
+}
+
+export type DashboardVenuesResponse = {
+  venues: DashboardVenueSummary[]
+}
+
+export type DashboardEventResponse = {
+  event: DashboardEventDetail
+}
+
+export type DashboardCreatedEventResponse = {
+  event: DashboardEventSummary
+}
+
+export type CreateDashboardEventInput = {
+  venueId: string
+  name: string
+  slug: string
+  status?: Extract<DashboardEventStatus, "draft" | "scheduled" | "active">
+  startsAt?: string
+  endsAt?: string
+  publicJoinEnabled?: boolean
+  publicQueueEnabled?: boolean
+}
+
 export type PlatformSetupStatusResponse = {
   setupRequired: boolean
 }
@@ -100,6 +174,15 @@ export type DashboardFetch = (
   init?: RequestInit
 ) => Promise<Response>
 
+type DashboardRequestInit = RequestInit & {
+  timeoutMs?: number
+}
+
+type DashboardFetchOptions = {
+  fetchImpl?: DashboardFetch
+  timeoutMs?: number
+}
+
 export function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "")
 }
@@ -119,6 +202,134 @@ export function buildDashboardApiUrl(path: string): string {
 
 export function buildDashboardEventStreamUrl(eventId: string): string {
   return buildDashboardApiUrl(`/dashboard/events/${encodeURIComponent(eventId)}/stream`)
+}
+
+export function buildDashboardEventQueuePath(eventId: string): string {
+  return `/dashboard/events/${encodeURIComponent(eventId)}/queue`
+}
+
+export async function listDashboardEvents(
+  options: { cookieHeader?: string; fetchImpl?: DashboardFetch } = {}
+): Promise<DashboardEventsResponse> {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const headers = new Headers()
+
+  if (options.cookieHeader) {
+    headers.set("Cookie", options.cookieHeader)
+  }
+
+  const response = await fetchImpl(buildDashboardApiUrl("/dashboard/events"), {
+    cache: "no-store",
+    credentials: "include",
+    headers
+  })
+
+  const payload = await readJson(response)
+
+  if (!response.ok) {
+    throw dashboardApiError(response.status, payload)
+  }
+
+  return assertDashboardEventsResponse(payload)
+}
+
+export async function listDashboardVenues(
+  options: { cookieHeader?: string; fetchImpl?: DashboardFetch } = {}
+): Promise<DashboardVenuesResponse> {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const headers = new Headers()
+
+  if (options.cookieHeader) {
+    headers.set("Cookie", options.cookieHeader)
+  }
+
+  const response = await fetchImpl(buildDashboardApiUrl("/dashboard/venues"), {
+    cache: "no-store",
+    credentials: "include",
+    headers
+  })
+
+  const payload = await readJson(response)
+
+  if (!response.ok) {
+    throw dashboardApiError(response.status, payload)
+  }
+
+  return assertDashboardVenuesResponse(payload)
+}
+
+export async function createDashboardEvent(
+  input: CreateDashboardEventInput,
+  options: DashboardFetchOptions = {}
+): Promise<DashboardCreatedEventResponse> {
+  return assertDashboardCreatedEventResponse(
+    await fetchDashboardJson(
+      "/dashboard/events",
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST",
+        timeoutMs: options.timeoutMs ?? DASHBOARD_MUTATION_TIMEOUT_MS
+      },
+      options.fetchImpl
+    )
+  )
+}
+
+export async function getDashboardEvent(
+  eventId: string,
+  options: { fetchImpl?: DashboardFetch } = {}
+): Promise<DashboardEventResponse> {
+  return assertDashboardEventResponse(
+    await fetchDashboardJson(`/dashboard/events/${encodeURIComponent(eventId)}`, {}, options.fetchImpl)
+  )
+}
+
+export async function startDashboardEvent(eventId: string, options: DashboardFetchOptions = {}): Promise<DashboardEventResponse> {
+  return postDashboardEventLifecycle(eventId, "start", options)
+}
+
+export async function pauseDashboardEvent(eventId: string, options: DashboardFetchOptions = {}): Promise<DashboardEventResponse> {
+  return postDashboardEventLifecycle(eventId, "pause", options)
+}
+
+export async function resumeDashboardEvent(eventId: string, options: DashboardFetchOptions = {}): Promise<DashboardEventResponse> {
+  return postDashboardEventLifecycle(eventId, "resume", options)
+}
+
+export async function closeDashboardEvent(eventId: string, options: DashboardFetchOptions = {}): Promise<DashboardEventResponse> {
+  return postDashboardEventLifecycle(eventId, "close", options)
+}
+
+export async function archiveDashboardEvent(eventId: string, options: DashboardFetchOptions = {}): Promise<DashboardEventResponse> {
+  return postDashboardEventLifecycle(eventId, "archive", options)
+}
+
+export async function cancelDashboardEvent(eventId: string, options: DashboardFetchOptions = {}): Promise<DashboardEventResponse> {
+  return postDashboardEventLifecycle(eventId, "cancel", options)
+}
+
+export async function updateDashboardEventFlags(
+  eventId: string,
+  flags: { publicJoinEnabled?: boolean; publicQueueEnabled?: boolean },
+  options: DashboardFetchOptions = {}
+): Promise<DashboardEventResponse> {
+  return assertDashboardEventResponse(
+    await fetchDashboardJson(
+      `/dashboard/events/${encodeURIComponent(eventId)}`,
+      {
+        body: JSON.stringify(flags),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "PATCH",
+        timeoutMs: options.timeoutMs ?? DASHBOARD_MUTATION_TIMEOUT_MS
+      },
+      options.fetchImpl
+    )
+  )
 }
 
 export async function getPlatformSetupStatus(options: { fetchImpl?: DashboardFetch } = {}): Promise<PlatformSetupStatusResponse> {
@@ -179,51 +390,51 @@ export async function getOperatorQueue(
 export async function approveRequest(
   eventId: string,
   requestId: string,
-  options: { fetchImpl?: DashboardFetch } = {}
+  options: DashboardFetchOptions = {}
 ): Promise<QueueActionResponse> {
-  return postQueueAction(eventId, requestId, "approve", undefined, options.fetchImpl)
+  return postQueueAction(eventId, requestId, "approve", undefined, options)
 }
 
 export async function rejectRequest(
   eventId: string,
   requestId: string,
-  options: { reason?: string; fetchImpl?: DashboardFetch } = {}
+  options: { reason?: string; fetchImpl?: DashboardFetch; timeoutMs?: number } = {}
 ): Promise<QueueActionResponse> {
   const body = options.reason ? { reason: options.reason } : undefined
-  return postQueueAction(eventId, requestId, "reject", body, options.fetchImpl)
+  return postQueueAction(eventId, requestId, "reject", body, options)
 }
 
 export async function startRequest(
   eventId: string,
   requestId: string,
-  options: { fetchImpl?: DashboardFetch } = {}
+  options: DashboardFetchOptions = {}
 ): Promise<QueueActionResponse> {
-  return postQueueAction(eventId, requestId, "start", undefined, options.fetchImpl)
+  return postQueueAction(eventId, requestId, "start", undefined, options)
 }
 
 export async function doneRequest(
   eventId: string,
   requestId: string,
-  options: { fetchImpl?: DashboardFetch } = {}
+  options: DashboardFetchOptions = {}
 ): Promise<QueueActionResponse> {
-  return postQueueAction(eventId, requestId, "done", undefined, options.fetchImpl)
+  return postQueueAction(eventId, requestId, "done", undefined, options)
 }
 
 export async function skipRequest(
   eventId: string,
   requestId: string,
-  options: { fetchImpl?: DashboardFetch } = {}
+  options: DashboardFetchOptions = {}
 ): Promise<QueueActionResponse> {
-  return postQueueAction(eventId, requestId, "skip", undefined, options.fetchImpl)
+  return postQueueAction(eventId, requestId, "skip", undefined, options)
 }
 
 export async function moveRequest(
   eventId: string,
   requestId: string,
   position: number,
-  options: { fetchImpl?: DashboardFetch } = {}
+  options: DashboardFetchOptions = {}
 ): Promise<QueueActionResponse> {
-  return postQueueAction(eventId, requestId, "move", { position }, options.fetchImpl)
+  return postQueueAction(eventId, requestId, "move", { position }, options)
 }
 
 async function postQueueAction(
@@ -231,12 +442,13 @@ async function postQueueAction(
   requestId: string,
   action: "approve" | "reject" | "start" | "done" | "skip" | "move",
   body: Record<string, unknown> | undefined,
-  fetchImpl?: DashboardFetch
+  options: DashboardFetchOptions
 ): Promise<QueueActionResponse> {
   return assertQueueActionResponse(
     await fetchDashboardJson(
       `/dashboard/events/${encodeURIComponent(eventId)}/requests/${encodeURIComponent(requestId)}/${action}`,
       {
+        timeoutMs: options.timeoutMs ?? DASHBOARD_MUTATION_TIMEOUT_MS,
         method: "POST",
         ...(body
           ? {
@@ -247,17 +459,52 @@ async function postQueueAction(
             }
           : {})
       },
-      fetchImpl
+      options.fetchImpl
     )
   )
 }
 
-async function fetchDashboardJson(path: string, init: RequestInit = {}, fetchImpl: DashboardFetch = fetch): Promise<unknown> {
-  const response = await fetchImpl(buildDashboardApiUrl(path), {
-    ...init,
-    cache: "no-store",
-    credentials: init.credentials ?? "include"
-  })
+async function postDashboardEventLifecycle(
+  eventId: string,
+  action: "start" | "pause" | "resume" | "close" | "archive" | "cancel",
+  options: DashboardFetchOptions
+): Promise<DashboardEventResponse> {
+  return assertDashboardEventResponse(
+    await fetchDashboardJson(
+      `/dashboard/events/${encodeURIComponent(eventId)}/${action}`,
+      {
+        method: "POST",
+        timeoutMs: options.timeoutMs ?? DASHBOARD_MUTATION_TIMEOUT_MS
+      },
+      options.fetchImpl
+    )
+  )
+}
+
+async function fetchDashboardJson(path: string, init: DashboardRequestInit = {}, fetchImpl: DashboardFetch = fetch): Promise<unknown> {
+  const { timeoutMs, ...requestInit } = init
+  const timeout = createTimeoutSignal(timeoutMs, requestInit.signal)
+  let response: Response
+
+  try {
+    const fetchInit: RequestInit = {
+      ...requestInit,
+      cache: "no-store",
+      credentials: requestInit.credentials ?? "include"
+    }
+    if (timeout.signal) {
+      fetchInit.signal = timeout.signal
+    }
+
+    response = await fetchImpl(buildDashboardApiUrl(path), fetchInit)
+  } catch (error) {
+    if (timeout.didTimeout() || isAbortError(error)) {
+      throw new DashboardApiError(0, "REQUEST_TIMEOUT", DASHBOARD_MUTATION_TIMEOUT_MESSAGE)
+    }
+    throw error
+  } finally {
+    timeout.cleanup()
+  }
 
   const payload = await readJson(response)
 
@@ -266,6 +513,45 @@ async function fetchDashboardJson(path: string, init: RequestInit = {}, fetchImp
   }
 
   return payload
+}
+
+function createTimeoutSignal(timeoutMs: number | undefined, externalSignal: AbortSignal | null | undefined) {
+  if (!timeoutMs) {
+    return {
+      cleanup: () => undefined,
+      didTimeout: () => false,
+      signal: externalSignal ?? undefined
+    }
+  }
+
+  const controller = new AbortController()
+  let timedOut = false
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  const onExternalAbort = () => controller.abort()
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort()
+    } else {
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true })
+    }
+  }
+
+  return {
+    cleanup: () => {
+      clearTimeout(timeoutHandle)
+      externalSignal?.removeEventListener("abort", onExternalAbort)
+    },
+    didTimeout: () => timedOut,
+    signal: controller.signal
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError"
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -389,6 +675,46 @@ export function assertOperatorQueueResponse(value: unknown): OperatorQueueRespon
   }
 }
 
+export function assertDashboardEventsResponse(value: unknown): DashboardEventsResponse {
+  if (!isRecord(value) || !Array.isArray(value.events) || !value.events.every(isDashboardEventSummary)) {
+    throw new Error("Invalid dashboard API response: events")
+  }
+
+  return {
+    events: value.events
+  }
+}
+
+export function assertDashboardVenuesResponse(value: unknown): DashboardVenuesResponse {
+  if (!isRecord(value) || !Array.isArray(value.venues) || !value.venues.every(isDashboardVenueSummary)) {
+    throw new Error("Invalid dashboard API response: venues")
+  }
+
+  return {
+    venues: value.venues
+  }
+}
+
+export function assertDashboardEventResponse(value: unknown): DashboardEventResponse {
+  if (!isRecord(value) || !isDashboardEventDetail(value.event)) {
+    throw new Error("Invalid dashboard API response: event")
+  }
+
+  return {
+    event: value.event
+  }
+}
+
+export function assertDashboardCreatedEventResponse(value: unknown): DashboardCreatedEventResponse {
+  if (!isRecord(value) || !isDashboardEventSummary(value.event)) {
+    throw new Error("Invalid dashboard API response: created event")
+  }
+
+  return {
+    event: value.event
+  }
+}
+
 function assertQueueActionResponse(value: unknown): QueueActionResponse {
   if (!isRecord(value) || !isOperatorQueueItem(value.request)) {
     throw new Error("Invalid dashboard API response: queue action")
@@ -444,6 +770,26 @@ export function assertClaimPlatformOwnerResponse(value: unknown): ClaimPlatformO
   }
 }
 
+function isDashboardEventDetail(value: unknown): value is DashboardEventDetail {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.venueId === "string" &&
+    typeof value.operatedByOrganizationId === "string" &&
+    (typeof value.createdByUserId === "string" || value.createdByUserId === null) &&
+    typeof value.name === "string" &&
+    typeof value.slug === "string" &&
+    isDashboardEventStatus(value.status) &&
+    (typeof value.startsAt === "string" || value.startsAt === null) &&
+    (typeof value.endsAt === "string" || value.endsAt === null) &&
+    typeof value.publicJoinEnabled === "boolean" &&
+    typeof value.publicQueueEnabled === "boolean"
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -478,8 +824,56 @@ function isOperatorQueueItem(value: unknown): value is OperatorQueueItem {
   )
 }
 
+function isDashboardEventSummary(value: unknown): value is DashboardEventSummary {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  const venue = value.venue
+  const organization = value.operatedByOrganization
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.slug === "string" &&
+    isDashboardEventStatus(value.status) &&
+    (typeof value.startsAt === "string" || value.startsAt === null) &&
+    (typeof value.endsAt === "string" || value.endsAt === null) &&
+    typeof value.publicJoinEnabled === "boolean" &&
+    typeof value.publicQueueEnabled === "boolean" &&
+    isRecord(venue) &&
+    typeof venue.id === "string" &&
+    typeof venue.name === "string" &&
+    typeof venue.slug === "string" &&
+    isRecord(organization) &&
+    typeof organization.id === "string" &&
+    typeof organization.name === "string" &&
+    typeof organization.slug === "string"
+  )
+}
+
+function isDashboardVenueSummary(value: unknown): value is DashboardVenueSummary {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return typeof value.id === "string" && typeof value.name === "string" && typeof value.slug === "string"
+}
+
 function isDomainUserStatus(value: unknown): value is "pending" | "active" | "disabled" {
   return value === "pending" || value === "active" || value === "disabled"
+}
+
+function isDashboardEventStatus(value: unknown): value is DashboardEventStatus {
+  return (
+    value === "draft" ||
+    value === "scheduled" ||
+    value === "active" ||
+    value === "paused" ||
+    value === "closed" ||
+    value === "archived" ||
+    value === "cancelled"
+  )
 }
 
 function isDashboardAccessReason(value: unknown): value is DashboardAccessReason {

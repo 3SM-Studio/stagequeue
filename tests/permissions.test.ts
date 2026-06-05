@@ -127,6 +127,45 @@ test("event lead_host has event.manage through event staff role mapping", async 
   assert.equal(await service.hasEventPermission("lead-host", "event-1", "event.manage"), true)
 })
 
+test("platform owner has MVP support access to operator event permissions", async () => {
+  const service = createPermissionService(
+    fakeRepository({
+      platformMemberships: {
+        "platform-owner": [{ role: "platform_owner", status: "active" }]
+      },
+      eventContexts: {
+        "platform-owner:event-1": {
+          event: {
+            id: "event-1",
+            venueId: "venue-1",
+            operatedByOrganizationId: "org-1",
+            status: "active"
+          },
+          organizationMembership: null,
+          venueAccess: [],
+          eventStaffAssignments: []
+        }
+      }
+    })
+  )
+
+  assert.equal(await service.hasEventPermission("platform-owner", "event-1", "event.view_stats"), true)
+  assert.equal(await service.hasEventPermission("platform-owner", "event-1", "event.operate_queue"), true)
+  assert.equal(await service.hasEventPermission("platform-owner", "event-1", "event.manage"), true)
+})
+
+test("platform owner event permission still requires an existing event", async () => {
+  const service = createPermissionService(
+    fakeRepository({
+      platformMemberships: {
+        "platform-owner": [{ role: "platform_owner", status: "active" }]
+      }
+    })
+  )
+
+  assert.equal(await service.hasEventPermission("platform-owner", "missing-event", "event.operate_queue"), false)
+})
+
 test("removed organization member does not pass event permission", async () => {
   const service = createPermissionService(
     fakeRepository({

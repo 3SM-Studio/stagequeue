@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { buildPublicVenueStreamUrl, getPublicQueueByVenueSlug, type PublicQueue } from "../lib/apiClient"
 import { shouldRefetchQueue } from "../lib/queueRefresh"
+import { createRefetchScheduler } from "../lib/refetchScheduler"
 
 export function PublicQueueView({ initialQueue, venueSlug }: { initialQueue: PublicQueue; venueSlug: string }) {
   const [queue, setQueue] = useState(initialQueue)
@@ -20,13 +21,14 @@ export function PublicQueueView({ initialQueue, venueSlug }: { initialQueue: Pub
   }, [venueSlug])
 
   useEffect(() => {
+    const scheduler = createRefetchScheduler(refresh)
     const source = new EventSource(buildPublicVenueStreamUrl(venueSlug), { withCredentials: true })
     source.addEventListener("open", () => setStatus("connected"))
     source.addEventListener("error", () => setStatus("stale"))
 
     const onMessage = (event: MessageEvent) => {
       if (shouldRefetchQueue(event.type)) {
-        void refresh()
+        scheduler.schedule()
       }
     }
 
@@ -50,6 +52,7 @@ export function PublicQueueView({ initialQueue, venueSlug }: { initialQueue: Pub
     }
 
     return () => {
+      scheduler.cancel()
       source.close()
     }
   }, [venueSlug, refresh])

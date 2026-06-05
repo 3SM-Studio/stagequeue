@@ -185,6 +185,27 @@ test("dashboard stream without event permission returns forbidden", async () => 
   }
 })
 
+test("dashboard stream allows platform owner support access", async () => {
+  const app = await createTestApp({ permissions: fakePermissions({ platformOwner: true }) })
+  await app.listen({ host: "127.0.0.1", port: 0 })
+  const port = (app.server.address() as AddressInfo).port
+  const controller = new AbortController()
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/dashboard/events/${EVENT_ID}/stream`, {
+      headers: {
+        Origin: "http://localhost:3001"
+      },
+      signal: controller.signal
+    })
+
+    assert.equal(response.status, 200)
+    assertAllowedSseCors(response, "http://localhost:3001")
+  } finally {
+    controller.abort()
+    await app.close()
+  }
+})
+
 test("event bus publishes only to subscribers of the target event", () => {
   const bus = createInMemoryDomainEventBus()
   const receivedA: DomainEventPayload[] = []
@@ -399,7 +420,8 @@ function makeEvent(status: string): EventSummary {
   }
 }
 
-function fakePermissions(options: { event?: Set<string>; platform?: Set<string> } = {}): PermissionService {
+function fakePermissions(options: { event?: Set<string>; platform?: Set<string>; platformOwner?: boolean } = {}): PermissionService {
+  const hasPlatformSupportAccess = options.platformOwner === true
   return {
     hasPlatformPermission: async (_userId, permission) => Boolean(options.platform?.has(permission)),
     requirePlatformPermission: async (_userId, permission) => requireAllowed(options.platform?.has(permission)),
@@ -407,8 +429,9 @@ function fakePermissions(options: { event?: Set<string>; platform?: Set<string> 
     requireOrganizationPermission: async () => requireAllowed(false),
     hasVenuePermission: async () => false,
     requireVenuePermission: async () => requireAllowed(false),
-    hasEventPermission: async (_userId, _eventId, permission) => Boolean(options.event?.has(permission)),
-    requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission))
+    hasEventPermission: async (_userId, _eventId, permission) => hasPlatformSupportAccess || Boolean(options.event?.has(permission)),
+    requireEventPermission: async (_userId, _eventId, permission) =>
+      requireAllowed(hasPlatformSupportAccess || options.event?.has(permission))
   }
 }
 
