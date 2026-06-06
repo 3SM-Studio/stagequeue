@@ -2,6 +2,19 @@
 
 These gates supplement the general standards.
 
+## Required GitHub check
+
+Protect `main` with the GitHub Actions check:
+
+```txt
+Repository CI / Quality gates
+```
+
+This check comes from `.github/workflows/ci.yml`. Branch protection should
+require pull requests, passing status checks, no force pushes and no deletion of
+`main`. Requiring branches to be up to date before merging is optional and may
+be enabled if the team wants stricter merge freshness.
+
 ## Event/venue/queue PRs MUST check
 
 - [ ] Platform owner path is tested.

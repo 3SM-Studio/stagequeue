@@ -28,6 +28,25 @@ Main branch MUST require:
 - no force push;
 - up-to-date branch if required by project policy.
 
+For this repository, GitHub branch protection MUST require the GitHub Actions
+check:
+
+```txt
+Repository CI / Quality gates
+```
+
+This is the job named `Quality gates` in `.github/workflows/ci.yml`.
+
+Minimal `main` branch protection settings:
+
+- require a pull request before merging;
+- require status checks to pass before merging;
+- require `Repository CI / Quality gates`;
+- require branches to be up to date before merging if the team wants stricter
+  linear freshness;
+- block force pushes;
+- block deletion of `main`.
+
 ## Environments
 
 Define:
