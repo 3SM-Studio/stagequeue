@@ -7,6 +7,7 @@ import {
   cancelDashboardEvent,
   closeDashboardEvent,
   doneRequest,
+  buildDashboardEventStreamUrl,
   getDashboardEvent,
   getOperatorQueue,
   moveRequest,
@@ -32,12 +33,16 @@ import {
   type DashboardLifecycleAction
 } from "../lib/eventLifecycleState"
 import {
+  getOperatorQueueStreamErrorState,
   getOperatorQueueErrorState,
+  type OperatorQueueStreamStatus,
   OPERATOR_QUEUE_REFRESH_ERROR_MESSAGE,
   OPERATOR_QUEUE_REFRESH_INTERVAL_MS,
   runOperatorActionWithPending,
   shouldPollOperatorQueue
 } from "../lib/operatorQueueState"
+import { createOperatorQueueStream } from "../lib/operatorQueueStream"
+import { createRefetchScheduler } from "../lib/refetchScheduler"
 import { GoogleSignInButton } from "./GoogleSignInButton"
 
 export function OperatorQueueView({ eventId }: { eventId: string }) {
@@ -48,6 +53,7 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
   const [error, setError] = useState<ReturnType<typeof getOperatorQueueErrorState> | null>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [streamStatus, setStreamStatus] = useState<OperatorQueueStreamStatus>("connecting")
   const inFlightRefresh = useRef<Promise<void> | null>(null)
   const busyActionRef = useRef<string | null>(null)
   const queueRef = useRef<OperatorQueueResponse | null>(null)
@@ -97,6 +103,33 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") {
+      setStreamStatus("disconnected")
+      return
+    }
+
+    let mounted = true
+    const setMountedStreamStatus = (status: OperatorQueueStreamStatus) => {
+      if (mounted) {
+        setStreamStatus(status)
+      }
+    }
+    const scheduler = createRefetchScheduler(() => refresh({ skipWhenBusy: true }))
+    const stream = createOperatorQueueStream({
+      eventSourceFactory: (url, init) => new EventSource(url, init),
+      onRefetch: scheduler.schedule,
+      onStatusChange: setMountedStreamStatus,
+      streamUrl: buildDashboardEventStreamUrl(eventId)
+    })
+
+    return () => {
+      mounted = false
+      scheduler.cancel()
+      stream.close()
+    }
+  }, [eventId, refresh])
 
   useEffect(() => {
     const onFocus = () => {
@@ -208,7 +241,9 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
           </p>
         </div>
         <div className="queue-header-actions">
-          <span className="stream-pill disconnected">manual refresh</span>
+          <span className={`stream-pill ${streamStatus === "connected" ? "connected" : "disconnected"}`}>
+            {streamStatus === "connected" ? "live" : streamStatus === "connecting" ? "connecting" : "live disconnected"}
+          </span>
           <button className="button secondary" disabled={refreshing || busyAction !== null} type="button" onClick={() => void refresh()}>
             {refreshing ? "Odswiezanie..." : "Odswiez kolejke"}
           </button>
@@ -235,6 +270,12 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
       {refreshError ? (
         <section className="notice warning">
           <span>{refreshError}</span>
+        </section>
+      ) : null}
+
+      {streamStatus === "disconnected" ? (
+        <section className="notice warning">
+          <span>{getOperatorQueueStreamErrorState().message}</span>
         </section>
       ) : null}
 

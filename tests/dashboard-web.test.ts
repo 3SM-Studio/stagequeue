@@ -87,14 +87,19 @@ import {
 } from "../apps/dashboard-web/lib/eventLifecycleState.ts"
 import {
   createOperatorQueueRefreshController,
+  getOperatorQueueStreamErrorState,
+  getOperatorQueueStreamKey,
+  getOperatorQueueStreamSubscriptions,
   getOperatorQueueErrorState,
   OPERATOR_QUEUE_REFRESH_ERROR_MESSAGE,
   OPERATOR_QUEUE_REFRESH_INTERVAL_MS,
+  operatorQueueRefetchEvents,
   runOperatorActionWithPending,
   runOperatorMutationWithRefresh,
   shouldPollOperatorQueue,
   shouldRefetchOperatorQueue
 } from "../apps/dashboard-web/lib/operatorQueueState.ts"
+import { createOperatorQueueStream, type DashboardEventSource } from "../apps/dashboard-web/lib/operatorQueueStream.ts"
 import { createRefetchScheduler as createDashboardRefetchScheduler } from "../apps/dashboard-web/lib/refetchScheduler.ts"
 import {
   getPlatformSetupRedirect,
@@ -1251,6 +1256,94 @@ test("dashboard-web stream URL builder uses dashboard event stream endpoint", ()
   })
 })
 
+test("dashboard-web operator queue stream opens one event stream with credentials", () => {
+  const statuses: string[] = []
+  let requestedUrl = ""
+  let requestedCredentials = false
+
+  const stream = createOperatorQueueStream({
+    eventSourceFactory: (url, init) => {
+      requestedUrl = url
+      requestedCredentials = init.withCredentials
+      return new FakeDashboardEventSource()
+    },
+    onRefetch: () => undefined,
+    onStatusChange: (status) => statuses.push(status),
+    streamUrl: "http://localhost:4321/dashboard/events/event-1/stream"
+  })
+
+  assert.equal(requestedUrl, "http://localhost:4321/dashboard/events/event-1/stream")
+  assert.equal(requestedCredentials, true)
+  assert.deepEqual(statuses, ["connecting"])
+
+  stream.close()
+})
+
+test("dashboard-web operator queue stream refreshes after queue update and request events", () => {
+  const source = new FakeDashboardEventSource()
+  let refetchCount = 0
+
+  const stream = createOperatorQueueStream({
+    eventSourceFactory: () => source,
+    onRefetch: () => {
+      refetchCount += 1
+    },
+    onStatusChange: () => undefined,
+    streamUrl: "http://localhost:4321/dashboard/events/event-1/stream"
+  })
+
+  source.emit("queue.updated")
+  source.emit("request.approved")
+  source.emit("connected")
+
+  assert.equal(refetchCount, 2)
+  assert.equal(operatorQueueRefetchEvents.includes("queue.updated"), true)
+  stream.close()
+})
+
+test("dashboard-web operator queue stream cleanup closes subscription", () => {
+  const source = new FakeDashboardEventSource()
+  const statuses: string[] = []
+
+  const stream = createOperatorQueueStream({
+    eventSourceFactory: () => source,
+    onRefetch: () => undefined,
+    onStatusChange: (status) => statuses.push(status),
+    streamUrl: "http://localhost:4321/dashboard/events/event-1/stream"
+  })
+
+  stream.close()
+
+  assert.equal(source.closeCalls, 1)
+  assert.deepEqual(statuses, ["connecting", "disconnected"])
+})
+
+test("dashboard-web operator queue stream errors are non-fatal", () => {
+  const source = new FakeDashboardEventSource()
+  const statuses: string[] = []
+
+  const stream = createOperatorQueueStream({
+    eventSourceFactory: () => source,
+    onRefetch: () => undefined,
+    onStatusChange: (status) => statuses.push(status),
+    streamUrl: "http://localhost:4321/dashboard/events/event-1/stream"
+  })
+
+  source.onerror?.(new Event("error"))
+  const state = getOperatorQueueStreamErrorState()
+
+  assert.equal(statuses.at(-1), "disconnected")
+  assert.equal(state.fatal, false)
+  assert.equal(state.kind, "stale")
+  stream.close()
+})
+
+test("dashboard-web operator queue stream subscriptions dedupe by event id", () => {
+  assert.deepEqual(getOperatorQueueStreamSubscriptions("event-1"), ["event-1"])
+  assert.deepEqual(getOperatorQueueStreamSubscriptions(null), [])
+  assert.equal(getOperatorQueueStreamKey("event-1"), getOperatorQueueStreamKey("event-1"))
+})
+
 test("dashboard-web operator queue state maps API statuses to readable UI states", () => {
   assert.equal(getOperatorQueueErrorState({ status: 401, message: "Unauthorized" }).kind, "login")
   assert.equal(getOperatorQueueErrorState({ status: 403, message: "Forbidden" }).kind, "forbidden")
@@ -1359,6 +1452,29 @@ function jsonResponse(body: unknown, status = 200): Response {
       "Content-Type": "application/json"
     }
   })
+}
+
+class FakeDashboardEventSource implements DashboardEventSource {
+  closeCalls = 0
+  listeners = new Map<string, Array<() => void>>()
+  onerror: ((event: Event) => void) | null = null
+  onopen: ((event: Event) => void) | null = null
+
+  addEventListener(type: string, listener: () => void): void {
+    const listeners = this.listeners.get(type) ?? []
+    listeners.push(listener)
+    this.listeners.set(type, listeners)
+  }
+
+  close(): void {
+    this.closeCalls += 1
+  }
+
+  emit(type: string): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener()
+    }
+  }
 }
 
 function operatorQueuePayload(status = "active") {

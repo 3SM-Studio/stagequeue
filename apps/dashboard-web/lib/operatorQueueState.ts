@@ -37,8 +37,26 @@ export const operatorQueueRefetchEvents = [
   "event.cancelled"
 ] as const
 
+export type OperatorQueueStreamStatus = "connecting" | "connected" | "disconnected"
+
 export function shouldRefetchOperatorQueue(eventType: string): boolean {
   return (operatorQueueRefetchEvents as readonly string[]).includes(eventType)
+}
+
+export function getOperatorQueueStreamKey(eventId: string): string {
+  return `dashboard-operator-queue:${eventId}`
+}
+
+export function getOperatorQueueStreamSubscriptions(eventId: string | null | undefined): string[] {
+  return eventId ? [eventId] : []
+}
+
+export function getOperatorQueueStreamErrorState() {
+  return {
+    fatal: false,
+    kind: "stale",
+    message: "Live odswiezanie kolejki jest chwilowo rozlaczone. Mozesz nadal uzyc recznego odswiezania."
+  } as const
 }
 
 export function shouldPollOperatorQueue(visibilityState: string, pendingAction: string | null): boolean {
