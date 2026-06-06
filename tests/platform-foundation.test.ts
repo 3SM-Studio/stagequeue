@@ -4,6 +4,7 @@ import { createApiApp } from "../apps/api/src/app.ts"
 import type { AuthenticatedDomainUser } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
+import { createAccessRequestsService } from "../apps/api/src/modules/accessRequests/service.ts"
 import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
 import type { PermissionService } from "../apps/api/src/permissions/service.ts"
@@ -261,6 +262,51 @@ test("platform owner can approve and reject access requests", async () => {
   }
 })
 
+test("access request cannot be approved twice", async () => {
+  const db = fakeDbForAccessRequest("pending")
+  const service = createAccessRequestsService(db.db)
+
+  const approved = await service.approveAccessRequest(ACCESS_REQUEST_ID, USER_ID)
+  await assert.rejects(() => service.approveAccessRequest(ACCESS_REQUEST_ID, USER_ID), {
+    statusCode: 409,
+    code: "ACCESS_REQUEST_INVALID_TRANSITION"
+  })
+
+  assert.equal(approved.status, "approved")
+  assert.equal(db.state.status, "approved")
+})
+
+test("access request cannot be rejected twice", async () => {
+  const db = fakeDbForAccessRequest("pending")
+  const service = createAccessRequestsService(db.db)
+
+  const rejected = await service.rejectAccessRequest(ACCESS_REQUEST_ID, USER_ID)
+  await assert.rejects(() => service.rejectAccessRequest(ACCESS_REQUEST_ID, USER_ID), {
+    statusCode: 409,
+    code: "ACCESS_REQUEST_INVALID_TRANSITION"
+  })
+
+  assert.equal(rejected.status, "rejected")
+  assert.equal(db.state.status, "rejected")
+})
+
+test("access request cannot be approved after reject or rejected after approve", async () => {
+  const rejectedDb = fakeDbForAccessRequest("rejected")
+  const approvedDb = fakeDbForAccessRequest("approved")
+
+  await assert.rejects(() => createAccessRequestsService(rejectedDb.db).approveAccessRequest(ACCESS_REQUEST_ID, USER_ID), {
+    statusCode: 409,
+    code: "ACCESS_REQUEST_INVALID_TRANSITION"
+  })
+  await assert.rejects(() => createAccessRequestsService(approvedDb.db).rejectAccessRequest(ACCESS_REQUEST_ID, USER_ID), {
+    statusCode: 409,
+    code: "ACCESS_REQUEST_INVALID_TRANSITION"
+  })
+
+  assert.equal(rejectedDb.state.status, "rejected")
+  assert.equal(approvedDb.state.status, "approved")
+})
+
 async function createTestApp(options: {
   user?: AuthenticatedDomainUser
   permissions?: PermissionService
@@ -297,7 +343,9 @@ function fakePermissions(options: {
     hasVenuePermission: async (_userId, _venueId, permission) => Boolean(options.venue?.has(permission)),
     requireVenuePermission: async (_userId, _venueId, permission) => requireAllowed(options.venue?.has(permission)),
     hasEventPermission: async (_userId, _eventId, permission) => Boolean(options.event?.has(permission)),
-    requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission))
+    requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission)),
+    hasPlatformOwnerEventSupportAccess: async () => false,
+    requirePlatformOwnerEventSupportAccess: async () => requireAllowed(false)
   }
 }
 
@@ -397,6 +445,66 @@ function fakeAccessRequest(status: string) {
     venueAccessRole: "karaoke_operator",
     status,
     message: null
+  }
+}
+
+function fakeDbForAccessRequest(initialStatus: "pending" | "approved" | "rejected"): DbResources & {
+  state: ReturnType<typeof fakeAccessRequest>
+  venueAccessWrites: number
+  userActivations: number
+} {
+  const resources: DbResources & {
+    state: ReturnType<typeof fakeAccessRequest>
+    venueAccessWrites: number
+    userActivations: number
+  } = {
+    state: fakeAccessRequest(initialStatus),
+    venueAccessWrites: 0,
+    userActivations: 0,
+    db: {
+      select: () => queryChain([resources.state]),
+      update: () => ({
+        set: (values: { status?: string }) => ({
+          where: () => ({
+            returning: () => {
+              if (resources.state.status !== "pending") {
+                return []
+              }
+              resources.state = { ...resources.state, status: values.status ?? resources.state.status }
+              return [resources.state]
+            }
+          })
+        })
+      }),
+      insert: () => ({
+        values: () => {
+          resources.venueAccessWrites += 1
+          return {
+            onConflictDoUpdate: () => undefined
+          }
+        }
+      }),
+      transaction: async <T>(action: (tx: DbResources["db"]) => Promise<T>) => action(resources.db)
+    } as unknown as DbResources["db"],
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"]
+  }
+
+  return resources
+}
+
+function queryChain<T>(result: T[]) {
+  return {
+    from() {
+      return this
+    },
+    where() {
+      return this
+    },
+    limit() {
+      return result
+    }
   }
 }
 

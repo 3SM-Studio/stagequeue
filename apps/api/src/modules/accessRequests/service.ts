@@ -1,5 +1,5 @@
 import { accessRequests, users, venueOrganizationAccess, type DbClient } from "@poza-nuta/db"
-import { eq, sql } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { ApiHttpError } from "../../errors.ts"
 
 export type AccessRequestSummary = {
@@ -20,6 +20,14 @@ export type AccessRequestsService = {
   approveAccessRequest(accessRequestId: string, reviewerUserId: string): Promise<AccessRequestSummary>
   rejectAccessRequest(accessRequestId: string, reviewerUserId: string): Promise<AccessRequestSummary>
 }
+
+type AccessRequestStatus = "pending" | "approved" | "rejected"
+type AccessRequestTransitionAction = "approve" | "reject"
+
+const accessRequestTransitions = {
+  approve: { from: ["pending"], to: "approved" },
+  reject: { from: ["pending"], to: "rejected" }
+} as const satisfies Record<AccessRequestTransitionAction, { from: readonly AccessRequestStatus[]; to: AccessRequestStatus }>
 
 export function createAccessRequestsService(db: DbClient): AccessRequestsService {
   return {
@@ -43,8 +51,9 @@ export function createAccessRequestsService(db: DbClient): AccessRequestsService
     async approveAccessRequest(accessRequestId, reviewerUserId) {
       const approve = async (tx: DbClient) => {
         const request = await findAccessRequest(tx, accessRequestId)
+        assertAccessRequestTransition(request, "approve")
 
-        const updated = await updateStatus(tx, accessRequestId, "approved", reviewerUserId)
+        const updated = await updateStatus(tx, accessRequestId, "pending", "approved", reviewerUserId)
 
         if (request.venueId && request.organizationId) {
           await tx
@@ -75,7 +84,10 @@ export function createAccessRequestsService(db: DbClient): AccessRequestsService
     },
 
     async rejectAccessRequest(accessRequestId, reviewerUserId) {
-      return updateStatus(db, accessRequestId, "rejected", reviewerUserId)
+      const request = await findAccessRequest(db, accessRequestId)
+      assertAccessRequestTransition(request, "reject")
+
+      return updateStatus(db, accessRequestId, "pending", "rejected", reviewerUserId)
     }
   }
 }
@@ -105,10 +117,21 @@ async function findAccessRequest(db: DbClient, accessRequestId: string): Promise
   return rows[0]
 }
 
+function assertAccessRequestTransition(
+  request: AccessRequestSummary,
+  action: AccessRequestTransitionAction
+): void {
+  const transition = accessRequestTransitions[action]
+  if (!transition.from.some((status) => status === request.status)) {
+    throw invalidTransition(request.status, transition.to)
+  }
+}
+
 async function updateStatus(
   db: DbClient,
   accessRequestId: string,
-  status: "approved" | "rejected",
+  expectedStatus: AccessRequestStatus,
+  status: AccessRequestStatus,
   reviewerUserId: string
 ): Promise<AccessRequestSummary> {
   const rows = await db
@@ -119,7 +142,7 @@ async function updateStatus(
       reviewedAt: sql`now()`,
       updatedAt: sql`now()`
     })
-    .where(eq(accessRequests.id, accessRequestId))
+    .where(and(eq(accessRequests.id, accessRequestId), eq(accessRequests.status, expectedStatus)))
     .returning({
       id: accessRequests.id,
       email: accessRequests.email,
@@ -134,8 +157,16 @@ async function updateStatus(
     })
 
   if (!rows[0]) {
-    throw new ApiHttpError(404, "NOT_FOUND", "Missing access request")
+    throw new ApiHttpError(409, "ACCESS_REQUEST_INVALID_TRANSITION", `Access request is no longer ${expectedStatus}`)
   }
 
   return rows[0]
+}
+
+function invalidTransition(from: string, to: string): ApiHttpError {
+  return new ApiHttpError(
+    409,
+    "ACCESS_REQUEST_INVALID_TRANSITION",
+    `Access request cannot transition from ${from} to ${to}`
+  )
 }
