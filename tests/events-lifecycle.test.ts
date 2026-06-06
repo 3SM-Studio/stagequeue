@@ -17,7 +17,8 @@ import type {
   EventSummary,
   EventsService,
   LifecycleAction,
-  PublicActiveEventLookup
+  PublicActiveEventLookup,
+  PublicEventDetail
 } from "../apps/api/src/modules/events/service.ts"
 
 const USER_ID = "11111111-1111-4111-8111-111111111111"
@@ -677,6 +678,33 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
       return {
         venue: { id: VENUE_ID, slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
         activeEvent: [...state.events.values()].find((event) => event.status === "active" || event.status === "paused") ?? null
+      }
+    },
+    async getPublicEventById(eventPublicId): Promise<PublicEventDetail | null> {
+      const event = state.events.get(eventPublicId)
+      if (!event || !["scheduled", "active", "paused", "closed"].includes(event.status)) {
+        return null
+      }
+
+      return {
+        event: {
+          id: event.id,
+          publicId: event.id,
+          name: event.name,
+          slug: event.slug,
+          status: event.status,
+          startsAt: event.startsAt,
+          endsAt: event.endsAt,
+          publicJoinEnabled: event.publicJoinEnabled,
+          publicQueueEnabled: event.publicQueueEnabled
+        },
+        venue: { id: VENUE_ID, slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
+        operatedByOrganization: { id: ORG_ID, slug: "org-x", name: "Org X" },
+        submissions: event.status === "active" && event.publicJoinEnabled ? { enabled: true } : { enabled: false },
+        publicQueue:
+          ["active", "paused", "closed"].includes(event.status) && event.publicQueueEnabled
+            ? { visible: true }
+            : { visible: false }
       }
     }
   }

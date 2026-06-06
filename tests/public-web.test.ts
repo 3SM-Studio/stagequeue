@@ -6,7 +6,9 @@ import {
   buildPublicVenueStreamUrl,
   getBrowserApiBaseUrl,
   getMyRequestsByVenueSlug,
+  getPublicEventDetail,
   getPublicQueueByVenueSlug,
+  type PublicEventDetail,
   type PublicMyRequest,
   submitSongRequestByVenueSlug
 } from "../apps/public-web/lib/apiClient.ts"
@@ -26,6 +28,7 @@ import {
   shouldPollMyRequests
 } from "../apps/public-web/lib/myRequestsState.ts"
 import { getVenueMetadataData, getVenuePageData } from "../apps/public-web/lib/pageData.ts"
+import { getPublicEventPageState } from "../apps/public-web/lib/publicEventPageState.ts"
 import { shouldRefetchQueue } from "../apps/public-web/lib/queueRefresh.ts"
 import { createRefetchScheduler as createPublicRefetchScheduler } from "../apps/public-web/lib/refetchScheduler.ts"
 import { getServerApiBaseUrl, getServerPublicQueueByVenueSlug } from "../apps/public-web/lib/serverApiClient.ts"
@@ -34,6 +37,7 @@ import { validateSubmitSongRequest } from "../apps/public-web/lib/submitValidati
 import {
   assertActiveEventResponse,
   assertMyRequestsResponse,
+  assertPublicEventDetailResponse,
   assertPublicQueueResponse,
   assertSubmitRequestResponse,
   assertVenueResponse
@@ -58,6 +62,24 @@ test("public-web API client builds venue-first queue request and stream URLs", (
     assert.equal(buildPublicVenueStreamUrl("klub-x"), "http://localhost:4321/public/venues/klub-x/stream")
   } finally {
     restoreEnv("NEXT_PUBLIC_API_URL", previous)
+  }
+})
+
+test("public-web API client builds event-first public event detail URL", async () => {
+  const previousFetch = globalThis.fetch
+  let requestedUrl = ""
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input)
+    return jsonResponse(validPublicEventDetailResponse())
+  }
+
+  try {
+    const detail = await getPublicEventDetail("33333333-3333-4333-8333-333333333333")
+
+    assert.equal(detail.event.name, "Friday Karaoke")
+    assert.equal(requestedUrl.endsWith("/public/events/33333333-3333-4333-8333-333333333333"), true)
+  } finally {
+    globalThis.fetch = previousFetch
   }
 })
 
@@ -174,6 +196,18 @@ test("public-web validates active event API responses", () => {
   assert.throws(
     () => assertActiveEventResponse({ venue: validActiveEventResponse().venue, activeEvent: { id: "event-1" } }),
     /Invalid public API response: active event/
+  )
+})
+
+test("public-web validates public event detail API responses", () => {
+  assert.equal(assertPublicEventDetailResponse(validPublicEventDetailResponse()).event.publicId, "event-1")
+  assert.throws(
+    () =>
+      assertPublicEventDetailResponse({
+        ...validPublicEventDetailResponse(),
+        publicQueue: { visible: "yes" }
+      }),
+    /Invalid public API response: public event detail/
   )
 })
 
@@ -377,6 +411,17 @@ test("public-web join page policy closes the form when publicJoinEnabled is fals
   assert.equal(visibility.kind, "closed")
 })
 
+test("public-web event-first page maps detail response to view state", () => {
+  const state = getPublicEventPageState(validPublicEventDetailResponse())
+
+  assert.equal(state.title, "Friday Karaoke")
+  assert.equal(state.venueLabel, "Klub X")
+  assert.equal(state.statusLabel, "Wydarzenie aktywne")
+  assert.equal(state.submissionsLabel, "Zgloszenia sa otwarte")
+  assert.equal(state.queueLabel, "Kolejka publiczna jest widoczna")
+  assert.equal(state.showQueueLink, true)
+})
+
 test("public-web join page policy does not open the form for paused events", () => {
   const visibility = getJoinVisibility({
     id: "event-1",
@@ -571,6 +616,40 @@ function validActiveEventResponse() {
       endsAt: null,
       publicJoinEnabled: true,
       publicQueueEnabled: true
+    }
+  }
+}
+
+function validPublicEventDetailResponse(): PublicEventDetail {
+  return {
+    event: {
+      id: "event-1",
+      publicId: "event-1",
+      name: "Friday Karaoke",
+      slug: "friday-karaoke",
+      status: "active",
+      startsAt: null,
+      endsAt: null,
+      publicJoinEnabled: true,
+      publicQueueEnabled: true
+    },
+    venue: {
+      id: "venue-1",
+      slug: "klub-x",
+      name: "Klub X",
+      city: "Warszawa",
+      timezone: "Europe/Warsaw"
+    },
+    operatedByOrganization: {
+      id: "org-1",
+      slug: "poza-nuta-demo",
+      name: "Poza Nuta Demo"
+    },
+    submissions: {
+      enabled: true
+    },
+    publicQueue: {
+      visible: true
     }
   }
 }

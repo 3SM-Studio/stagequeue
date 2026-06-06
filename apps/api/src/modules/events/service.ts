@@ -14,7 +14,14 @@ import {
 import { and, eq, inArray, ne, sql } from "drizzle-orm"
 import { ApiHttpError } from "../../errors.ts"
 import type { DomainEventBus, DomainEventType } from "../../plugins/eventBus.ts"
-import { isPublicOrganizationVisible, isPublicVenueVisible } from "../publicVisibility.ts"
+import {
+  assertPublicEventContainerVisible,
+  assertPublicEventDetailVisible,
+  getPublicQueueState,
+  getPublicSubmissionsState,
+  isPublicOrganizationVisible,
+  isPublicVenueVisible
+} from "../publicVisibility.ts"
 
 export type EventSummary = {
   id: string
@@ -61,6 +68,40 @@ export type PublicActiveEventLookup = {
     timezone: string
   }
   activeEvent: EventSummary | null
+}
+
+export type PublicEventDetail = {
+  event: {
+    id: string
+    publicId: string
+    name: string
+    slug: string
+    status: string
+    startsAt: Date | null
+    endsAt: Date | null
+    publicJoinEnabled: boolean
+    publicQueueEnabled: boolean
+  }
+  venue: {
+    id: string
+    slug: string
+    name: string
+    city: string | null
+    timezone: string
+  }
+  operatedByOrganization: {
+    id: string
+    slug: string
+    name: string
+  }
+  submissions: {
+    enabled: boolean
+    reason?: string
+  }
+  publicQueue: {
+    visible: boolean
+    reason?: string
+  }
 }
 
 export type CreateEventInput = {
@@ -117,6 +158,7 @@ export type EventsService = {
   organizationHasActiveVenueAccess(organizationId: string, venueId: string): Promise<boolean>
   userIsActiveOrganizationMember(userId: string, organizationId: string): Promise<boolean>
   getPublicActiveEventByVenueSlug(venueSlug: string): Promise<PublicActiveEventLookup | null>
+  getPublicEventById(eventPublicId: string): Promise<PublicEventDetail | null>
 }
 
 const lifecycleTransitions = {
@@ -458,6 +500,54 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         },
         activeEvent: active?.event ?? null
       }
+    },
+
+    async getPublicEventById(eventPublicId) {
+      const rows = await db
+        .select(publicEventDetailSelection)
+        .from(events)
+        .innerJoin(venues, eq(events.venueId, venues.id))
+        .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+        .where(eq(events.id, eventPublicId))
+        .limit(1)
+      const row = rows[0]
+      if (!row) {
+        return null
+      }
+
+      assertPublicEventContainerVisible({
+        venue: row.venue,
+        organization: row.organization
+      })
+      assertPublicEventDetailVisible(row.event)
+
+      return {
+        event: {
+          id: row.event.id,
+          publicId: row.event.id,
+          name: row.event.name,
+          slug: row.event.slug,
+          status: row.event.status,
+          startsAt: row.event.startsAt,
+          endsAt: row.event.endsAt,
+          publicJoinEnabled: row.event.publicJoinEnabled,
+          publicQueueEnabled: row.event.publicQueueEnabled
+        },
+        venue: {
+          id: row.venue.id,
+          slug: row.venue.slug,
+          name: row.venue.name,
+          city: row.venue.city,
+          timezone: row.venue.timezone
+        },
+        operatedByOrganization: {
+          id: row.organization.id,
+          slug: row.organization.slug,
+          name: row.organization.name
+        },
+        submissions: getPublicSubmissionsState(row.event),
+        publicQueue: getPublicQueueState(row.event)
+      }
     }
   }
 }
@@ -584,6 +674,34 @@ const dashboardEventSelection = {
   venueSlug: venues.slug,
   organizationName: organizations.name,
   organizationSlug: organizations.slug
+}
+
+const publicEventDetailSelection = {
+  event: {
+    id: events.id,
+    name: events.name,
+    slug: events.slug,
+    status: events.status,
+    startsAt: events.startsAt,
+    endsAt: events.endsAt,
+    publicJoinEnabled: events.publicJoinEnabled,
+    publicQueueEnabled: events.publicQueueEnabled
+  },
+  venue: {
+    id: venues.id,
+    slug: venues.slug,
+    name: venues.name,
+    city: venues.city,
+    timezone: venues.timezone,
+    status: venues.status,
+    verificationStatus: venues.verificationStatus
+  },
+  organization: {
+    id: organizations.id,
+    slug: organizations.slug,
+    name: organizations.name,
+    status: organizations.status
+  }
 }
 
 type DashboardEventRow = EventSummary & {

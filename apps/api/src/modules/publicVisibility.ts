@@ -1,6 +1,7 @@
 import { ApiHttpError } from "../errors.ts"
 
 const publicQueueVisibleStatuses = ["active", "paused", "closed"] as const
+const publicEventDetailVisibleStatuses = ["scheduled", "active", "paused", "closed"] as const
 
 export type PublicVenueVisibility = {
   status: string
@@ -13,6 +14,12 @@ export type PublicOrganizationVisibility = {
 
 export type PublicQueueVisibilityEvent = {
   status: string
+  publicQueueEnabled: boolean
+}
+
+export type PublicEventDetailVisibilityEvent = {
+  status: string
+  publicJoinEnabled: boolean
   publicQueueEnabled: boolean
 }
 
@@ -46,4 +53,34 @@ export function assertPublicQueueVisible(event: PublicQueueVisibilityEvent): voi
   if (!publicQueueVisibleStatuses.includes(event.status as (typeof publicQueueVisibleStatuses)[number])) {
     throw new ApiHttpError(409, "CONFLICT", "Queue is not active for this event")
   }
+}
+
+export function assertPublicEventDetailVisible(event: PublicEventDetailVisibilityEvent): void {
+  if (!publicEventDetailVisibleStatuses.includes(event.status as (typeof publicEventDetailVisibleStatuses)[number])) {
+    throw new ApiHttpError(404, "NOT_FOUND", "Missing event")
+  }
+}
+
+export function getPublicSubmissionsState(event: PublicEventDetailVisibilityEvent): { enabled: boolean; reason?: string } {
+  if (event.status !== "active") {
+    return { enabled: false, reason: "EVENT_NOT_ACTIVE" }
+  }
+
+  if (!event.publicJoinEnabled) {
+    return { enabled: false, reason: "PUBLIC_JOIN_DISABLED" }
+  }
+
+  return { enabled: true }
+}
+
+export function getPublicQueueState(event: PublicEventDetailVisibilityEvent): { visible: boolean; reason?: string } {
+  if (!event.publicQueueEnabled) {
+    return { visible: false, reason: "PUBLIC_QUEUE_DISABLED" }
+  }
+
+  if (!publicQueueVisibleStatuses.includes(event.status as (typeof publicQueueVisibleStatuses)[number])) {
+    return { visible: false, reason: "QUEUE_NOT_VISIBLE" }
+  }
+
+  return { visible: true }
 }

@@ -1,6 +1,7 @@
 import {
   assertActiveEventResponse,
   assertMyRequestsResponse,
+  assertPublicEventDetailResponse,
   assertPublicQueueResponse,
   assertSubmitRequestResponse,
   assertVenueResponse
@@ -41,6 +42,40 @@ export type ActiveEventLookup = {
     timezone: string
   }
   activeEvent: PublicEvent | null
+}
+
+export type PublicEventDetail = {
+  event: {
+    id: string
+    publicId: string
+    name: string
+    slug: string
+    status: PublicEvent["status"]
+    startsAt: string | null
+    endsAt: string | null
+    publicJoinEnabled: boolean
+    publicQueueEnabled: boolean
+  }
+  venue: {
+    id: string
+    slug: string
+    name: string
+    city: string | null
+    timezone: string
+  }
+  operatedByOrganization: {
+    id: string
+    slug: string
+    name: string
+  }
+  submissions: {
+    enabled: boolean
+    reason?: string
+  }
+  publicQueue: {
+    visible: boolean
+    reason?: string
+  }
 }
 
 export type QueueItem = {
@@ -166,6 +201,10 @@ export async function getActiveEvent(venueSlug: string): Promise<ActiveEventLook
 
 export async function getPublicQueue(eventId: string): Promise<PublicQueue> {
   return assertPublicQueueResponse(await fetchJson(`/public/events/${encodeURIComponent(eventId)}/queue`))
+}
+
+export async function getPublicEventDetail(eventPublicId: string): Promise<PublicEventDetail> {
+  return assertPublicEventDetailResponse(await fetchJson(`/public/events/${encodeURIComponent(eventPublicId)}`))
 }
 
 export async function getPublicQueueByVenueSlug(venueSlug: string): Promise<PublicQueue> {
