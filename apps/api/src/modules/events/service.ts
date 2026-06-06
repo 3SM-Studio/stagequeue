@@ -218,8 +218,16 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
     },
 
     async patchEvent(eventId, input) {
+      const existing = await this.getById(eventId)
+      if (!existing) {
+        throw notFound("Missing event")
+      }
+
       const update: Partial<typeof events.$inferInsert> = {}
-      validateEventDates(input.startsAt, input.endsAt)
+      const mergedStartsAt = input.startsAt === undefined ? existing.startsAt : new Date(input.startsAt)
+      const mergedEndsAt = input.endsAt === undefined ? existing.endsAt : new Date(input.endsAt)
+      validateEventDateRange(mergedStartsAt, mergedEndsAt)
+
       if (input.name !== undefined) {
         update.name = input.name
       }
@@ -240,10 +248,6 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
       }
 
       if (Object.keys(update).length === 0) {
-        const existing = await this.getById(eventId)
-        if (!existing) {
-          throw notFound("Missing event")
-        }
         return existing
       }
 
@@ -494,11 +498,11 @@ async function resolveDefaultOrganizationForVenue(db: DbClient, venueId: string)
 }
 
 function validateEventDates(startsAt: string | undefined, endsAt: string | undefined): void {
-  if (!startsAt || !endsAt) {
-    return
-  }
+  validateEventDateRange(startsAt ? new Date(startsAt) : null, endsAt ? new Date(endsAt) : null)
+}
 
-  if (Date.parse(endsAt) <= Date.parse(startsAt)) {
+function validateEventDateRange(startsAt: Date | null, endsAt: Date | null): void {
+  if (startsAt && endsAt && endsAt.getTime() <= startsAt.getTime()) {
     throw new ApiHttpError(400, "BAD_REQUEST", "endsAt must be after startsAt")
   }
 }
@@ -627,7 +631,19 @@ function hasTransaction(db: DbClient): db is TransactionCapableDb {
 }
 
 async function inTransaction<T>(db: DbClient, action: (tx: DbClient) => Promise<T>): Promise<T> {
-  return hasTransaction(db) ? db.transaction(action) : action(db)
+  try {
+    return await (hasTransaction(db) ? db.transaction(action) : action(db))
+  } catch (error) {
+    throw mapEventLifecycleError(error)
+  }
+}
+
+export function mapEventLifecycleError(error: unknown): unknown {
+  if (isPgUniqueViolation(error) && error.constraint === "events_one_active_or_paused_per_venue_unique") {
+    return new ApiHttpError(409, "VENUE_HAS_ACTIVE_EVENT", "Venue already has an active or paused event")
+  }
+
+  return error
 }
 
 function notFound(message: string): ApiHttpError {

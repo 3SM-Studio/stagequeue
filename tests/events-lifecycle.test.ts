@@ -4,6 +4,7 @@ import { createApiApp } from "../apps/api/src/app.ts"
 import type { AuthenticatedDomainUser } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
+import { createEventsService, mapEventLifecycleError } from "../apps/api/src/modules/events/service.ts"
 import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
 import type { PermissionService } from "../apps/api/src/permissions/service.ts"
@@ -20,6 +21,7 @@ const USER_ID = "11111111-1111-4111-8111-111111111111"
 const OTHER_USER_ID = "22222222-2222-4222-8222-222222222222"
 const ORG_ID = "33333333-3333-4333-8333-333333333333"
 const VENUE_ID = "44444444-4444-4444-8444-444444444444"
+const EVENT_ID = "55555555-5555-4555-8555-555555555555"
 
 test("organization with venue access can create an event", async () => {
   const events = createInMemoryEventsService()
@@ -218,6 +220,100 @@ test("start event sets active and blocks another active event in the same venue"
   }
 })
 
+test("lifecycle unique running-event conflict maps to controlled 409", async () => {
+  const db = fakeDbForLifecycleUniqueRunningEventConflict()
+  const app = await createTestApp({
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const response = await app.inject({ method: "POST", url: `/dashboard/events/${EVENT_ID}/start` })
+    const body = response.json()
+
+    assert.equal(response.statusCode, 409)
+    assert.equal(body.error.code, "VENUE_HAS_ACTIVE_EVENT")
+    assert.equal(body.error.message, "Venue already has an active or paused event")
+    assert.equal(JSON.stringify(body).includes("events_one_active_or_paused_per_venue_unique"), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("lifecycle error mapper does not mask unknown database errors", () => {
+  const unknown = { code: "23505", constraint: "some_other_unique_constraint" }
+
+  assert.equal(mapEventLifecycleError(unknown), unknown)
+})
+
+test("patch event rejects a start date that makes the merged date range invalid", async () => {
+  const db = fakeDbForPatchEvent(makeEventWithDates("2026-06-10T20:00:00.000Z", "2026-06-10T23:00:00.000Z"))
+  const app = await createTestApp({
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/dashboard/events/${EVENT_ID}`,
+      payload: { startsAt: "2026-06-11T00:00:00.000Z" }
+    })
+
+    assert.equal(response.statusCode, 400)
+    assert.equal(response.json().error.code, "BAD_REQUEST")
+    assert.equal(response.json().error.message, "endsAt must be after startsAt")
+    assert.equal(db.updated, false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("patch event rejects an end date that makes the merged date range invalid", async () => {
+  const db = fakeDbForPatchEvent(makeEventWithDates("2026-06-10T20:00:00.000Z", "2026-06-10T23:00:00.000Z"))
+  const app = await createTestApp({
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/dashboard/events/${EVENT_ID}`,
+      payload: { endsAt: "2026-06-10T19:00:00.000Z" }
+    })
+
+    assert.equal(response.statusCode, 400)
+    assert.equal(response.json().error.code, "BAD_REQUEST")
+    assert.equal(response.json().error.message, "endsAt must be after startsAt")
+    assert.equal(db.updated, false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("patch event accepts a valid merged date range when both dates change", async () => {
+  const db = fakeDbForPatchEvent(makeEventWithDates("2026-06-10T20:00:00.000Z", "2026-06-10T23:00:00.000Z"))
+  const app = await createTestApp({
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/dashboard/events/${EVENT_ID}`,
+      payload: {
+        startsAt: "2026-06-11T20:00:00.000Z",
+        endsAt: "2026-06-11T23:00:00.000Z"
+      }
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().event.startsAt, "2026-06-11T20:00:00.000Z")
+    assert.equal(response.json().event.endsAt, "2026-06-11T23:00:00.000Z")
+    assert.equal(db.updated, true)
+  } finally {
+    await app.close()
+  }
+})
+
 test("pause, resume and close follow allowed lifecycle transitions", async () => {
   const events = createInMemoryEventsService()
   const event = events.addSeedEvent("friday", "scheduled")
@@ -227,6 +323,20 @@ test("pause, resume and close follow allowed lifecycle transitions", async () =>
     assert.equal((await app.inject({ method: "POST", url: `/dashboard/events/${event.id}/pause` })).json().event.status, "paused")
     assert.equal((await app.inject({ method: "POST", url: `/dashboard/events/${event.id}/resume` })).json().event.status, "active")
     assert.equal((await app.inject({ method: "POST", url: `/dashboard/events/${event.id}/close` })).json().event.status, "closed")
+  } finally {
+    await app.close()
+  }
+})
+
+test("platform owner lifecycle support access uses explicit support override", async () => {
+  const events = createInMemoryEventsService()
+  const event = events.addSeedEvent("friday", "scheduled")
+  const app = await createTestApp({ events, permissions: fakePermissions({ platformOwner: true }) })
+  try {
+    const response = await app.inject({ method: "POST", url: `/dashboard/events/${event.id}/start` })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().event.status, "active")
   } finally {
     await app.close()
   }
@@ -555,6 +665,14 @@ function makeEvent(id: string, slug: string, status: string): EventSummary {
   }
 }
 
+function makeEventWithDates(startsAt: string, endsAt: string): EventSummary {
+  return {
+    ...makeEvent(EVENT_ID, "date-patch", "scheduled"),
+    startsAt: new Date(startsAt),
+    endsAt: new Date(endsAt)
+  }
+}
+
 function toDashboardEvent(event: EventSummary): DashboardEventSummary {
   return {
     ...event,
@@ -632,7 +750,9 @@ function fakePermissions(options: {
   platform?: Set<string>
   venue?: Set<string>
   event?: Set<string>
+  platformOwner?: boolean
 } = {}): PermissionService {
+  const hasPlatformSupportAccess = options.platformOwner === true
   return {
     hasPlatformPermission: async (_userId, permission) => Boolean(options.platform?.has(permission)),
     requirePlatformPermission: async (_userId, permission) => requireAllowed(options.platform?.has(permission)),
@@ -641,7 +761,9 @@ function fakePermissions(options: {
     hasVenuePermission: async (_userId, _venueId, permission) => Boolean(options.venue?.has(permission)),
     requireVenuePermission: async (_userId, _venueId, permission) => requireAllowed(options.venue?.has(permission)),
     hasEventPermission: async (_userId, _eventId, permission) => Boolean(options.event?.has(permission)),
-    requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission))
+    requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission)),
+    hasPlatformOwnerEventSupportAccess: async () => hasPlatformSupportAccess,
+    requirePlatformOwnerEventSupportAccess: async () => requireAllowed(hasPlatformSupportAccess)
   }
 }
 
@@ -693,6 +815,77 @@ function fakeDbResources(): DbResources {
     pool: {
       end: async () => undefined
     } as unknown as DbResources["pool"]
+  }
+}
+
+function fakeDbForLifecycleUniqueRunningEventConflict(): DbResources {
+  const event = makeEvent(EVENT_ID, "race-event", "scheduled")
+  let selectCount = 0
+  return {
+    db: {
+      select: () => {
+        selectCount += 1
+        return queryChain(selectCount === 1 ? [event] : [])
+      },
+      update: () => ({
+        set: () => ({
+          where: () => ({
+            returning: () => {
+              throw { code: "23505", constraint: "events_one_active_or_paused_per_venue_unique" }
+            }
+          })
+        })
+      }),
+      insert: () => ({
+        values: () => undefined
+      })
+    } as unknown as DbResources["db"],
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"]
+  }
+}
+
+function fakeDbForPatchEvent(initial: EventSummary): DbResources & { updated: boolean } {
+  let current = initial
+  const resources: DbResources & { updated: boolean } = {
+    updated: false,
+    db: {
+      select: () => queryChain([current]),
+      update: () => ({
+        set: (values: Partial<EventSummary>) => ({
+          where: () => ({
+            returning: () => {
+              resources.updated = true
+              current = { ...current, ...values }
+              return [current]
+            }
+          })
+        })
+      })
+    } as unknown as DbResources["db"],
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"]
+  }
+
+  return resources
+}
+
+function queryChain<T>(result: T[]) {
+  return {
+    from() {
+      return this
+    },
+    innerJoin() {
+      return this
+    },
+    where() {
+      return this
+    },
+    limit() {
+      return result
+    }
   }
 }
 
