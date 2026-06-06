@@ -20,6 +20,7 @@ General rules remain in `docs/standards/`. This folder answers: "How do those st
 - `12-live-karaoke-manual-qa-playbook.md`
 - `13-qa-evidence-release-signoff-template.md`
 - `14-live-incident-runbook.md`
+- `15-db-backup-migration-runbook.md`
 
 ## Rule
 
