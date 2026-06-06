@@ -17,11 +17,11 @@ General rules remain in `docs/standards/`. This folder answers: "How do those st
 - `09-v3-quality-gates.md`
 - `10-production-deployment-checklist.md`
 - `11-poza-nuta-release-checklist.md`
+- `12-live-karaoke-manual-qa-playbook.md`
 
 ## Rule
 
 If a project decision conflicts with the general standard, it must be documented as an ADR with consequences.
-
 
 ## Legacy and project-specific migrated material
 
