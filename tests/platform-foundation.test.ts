@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { createApiApp } from "../apps/api/src/app.ts"
+import { createApiApp, type CreateApiAppOptions } from "../apps/api/src/app.ts"
 import type { AuthenticatedDomainUser } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
@@ -8,12 +8,20 @@ import { createAccessRequestsService } from "../apps/api/src/modules/accessReque
 import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
 import type { PermissionService } from "../apps/api/src/permissions/service.ts"
+import type {
+  ListPlatformSupportAuditEventsInput,
+  PlatformSupportAuditEventSummary,
+  PlatformSupportAuditService
+} from "../apps/api/src/modules/platformSupportAudit/service.ts"
 
 const USER_ID = "11111111-1111-4111-8111-111111111111"
+const PLATFORM_OWNER_ID = "11111111-1111-4111-8111-111111111112"
 const ORG_ID = "22222222-2222-4222-8222-222222222222"
 const OTHER_ORG_ID = "33333333-3333-4333-8333-333333333333"
 const VENUE_ID = "44444444-4444-4444-8444-444444444444"
 const ACCESS_REQUEST_ID = "55555555-5555-4555-8555-555555555555"
+const EVENT_ID = "66666666-6666-4666-8666-666666666666"
+const OTHER_EVENT_ID = "77777777-7777-4777-8777-777777777777"
 
 test("dashboard user sees their organizations", async () => {
   const app = await createTestApp({
@@ -262,6 +270,170 @@ test("platform owner can approve and reject access requests", async () => {
   }
 })
 
+test("platform owner can list support audit events newest first", async () => {
+  const audit = fakePlatformSupportAuditService({
+    ownerUserIds: new Set([PLATFORM_OWNER_ID]),
+    events: [
+      fakeSupportAuditEvent({
+        id: "88888888-8888-4888-8888-888888888888",
+        createdAt: new Date("2026-06-06T10:00:00.000Z"),
+        operation: "dashboard.queue.view"
+      }),
+      fakeSupportAuditEvent({
+        id: "99999999-9999-4999-8999-999999999999",
+        createdAt: new Date("2026-06-06T10:05:00.000Z"),
+        operation: "dashboard.queue.operate"
+      })
+    ]
+  })
+  const app = await createTestApp({
+    user: { id: PLATFORM_OWNER_ID, email: "owner@example.com", name: "Owner", status: "active" },
+    services: {
+      platformSupportAudit: audit.service
+    }
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: "/dashboard/platform/support-audit-events" })
+    const body = response.json()
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(
+      body.auditEvents.map((event: { id: string }) => event.id),
+      ["99999999-9999-4999-8999-999999999999", "88888888-8888-4888-8888-888888888888"]
+    )
+    assert.equal(body.auditEvents[0].actorUserId, USER_ID)
+    assert.equal(body.auditEvents[0].targetEventId, EVENT_ID)
+    assert.equal(body.auditEvents[0].operation, "dashboard.queue.operate")
+    assert.equal(body.auditEvents[0].permission, "event.operate_queue")
+    assert.equal(body.auditEvents[0].accessType, "platform_owner_support")
+    assert.equal(body.auditEvents[0].outcome, "allowed")
+    assert.deepEqual(body.auditEvents[0].metadata, { eventStatus: "active" })
+    assert.deepEqual(Object.keys(body.auditEvents[0]).sort(), [
+      "accessType",
+      "actorUserId",
+      "createdAt",
+      "id",
+      "metadata",
+      "operation",
+      "outcome",
+      "permission",
+      "targetEventId"
+    ])
+  } finally {
+    await app.close()
+  }
+})
+
+test("support audit endpoint requires an authenticated active platform owner", async () => {
+  const userWithoutPlatformRole = await createTestApp({
+    services: {
+      platformSupportAudit: fakePlatformSupportAuditService({ ownerUserIds: new Set() }).service
+    }
+  })
+  try {
+    const response = await userWithoutPlatformRole.inject({
+      method: "GET",
+      url: "/dashboard/platform/support-audit-events"
+    })
+
+    assert.equal(response.statusCode, 403)
+    assert.equal(response.json().error.code, "FORBIDDEN")
+  } finally {
+    await userWithoutPlatformRole.close()
+  }
+
+  const eventStaffWithoutPlatformRole = await createTestApp({
+    permissions: fakePermissions({
+      event: new Set(["event.operate_queue"]),
+      organization: new Set(["organization.manage_profile"])
+    }),
+    services: {
+      platformSupportAudit: fakePlatformSupportAuditService({ ownerUserIds: new Set() }).service
+    }
+  })
+  try {
+    const response = await eventStaffWithoutPlatformRole.inject({
+      method: "GET",
+      url: "/dashboard/platform/support-audit-events"
+    })
+
+    assert.equal(response.statusCode, 403)
+    assert.equal(response.json().error.code, "FORBIDDEN")
+  } finally {
+    await eventStaffWithoutPlatformRole.close()
+  }
+
+  const unauthenticated = await createTestApp({ authenticated: false })
+  try {
+    const response = await unauthenticated.inject({ method: "GET", url: "/dashboard/platform/support-audit-events" })
+
+    assert.equal(response.statusCode, 401)
+    assert.equal(response.json().error.code, "UNAUTHORIZED")
+  } finally {
+    await unauthenticated.close()
+  }
+})
+
+test("support audit endpoint applies pagination defaults, cap and filters", async () => {
+  const audit = fakePlatformSupportAuditService({
+    ownerUserIds: new Set([PLATFORM_OWNER_ID]),
+    events: [
+      fakeSupportAuditEvent({
+        actorUserId: USER_ID,
+        targetEventId: EVENT_ID,
+        operation: "dashboard.queue.view"
+      }),
+      fakeSupportAuditEvent({
+        actorUserId: PLATFORM_OWNER_ID,
+        targetEventId: EVENT_ID,
+        operation: "dashboard.queue.view"
+      }),
+      fakeSupportAuditEvent({
+        actorUserId: USER_ID,
+        targetEventId: OTHER_EVENT_ID,
+        operation: "dashboard.event.read"
+      })
+    ]
+  })
+  const app = await createTestApp({
+    user: { id: PLATFORM_OWNER_ID, email: "owner@example.com", name: "Owner", status: "active" },
+    services: {
+      platformSupportAudit: audit.service
+    }
+  })
+  try {
+    const defaultResponse = await app.inject({ method: "GET", url: "/dashboard/platform/support-audit-events" })
+    assert.equal(defaultResponse.statusCode, 200)
+    assert.equal(audit.calls[0]?.limit, 50)
+    assert.equal(audit.calls[0]?.offset, 0)
+
+    const cappedResponse = await app.inject({
+      method: "GET",
+      url: "/dashboard/platform/support-audit-events?limit=999&offset=1"
+    })
+    assert.equal(cappedResponse.statusCode, 200)
+    assert.equal(audit.calls[1]?.limit, 100)
+    assert.equal(audit.calls[1]?.offset, 1)
+
+    const filteredResponse = await app.inject({
+      method: "GET",
+      url: `/dashboard/platform/support-audit-events?actorUserId=${USER_ID}&targetEventId=${EVENT_ID}&operation=dashboard.queue.view`
+    })
+    const body = filteredResponse.json()
+
+    assert.equal(filteredResponse.statusCode, 200)
+    assert.equal(body.auditEvents.length, 1)
+    assert.equal(body.auditEvents[0].actorUserId, USER_ID)
+    assert.equal(body.auditEvents[0].targetEventId, EVENT_ID)
+    assert.equal(body.auditEvents[0].operation, "dashboard.queue.view")
+    assert.equal(audit.calls[2]?.actorUserId, USER_ID)
+    assert.equal(audit.calls[2]?.targetEventId, EVENT_ID)
+    assert.equal(audit.calls[2]?.operation, "dashboard.queue.view")
+  } finally {
+    await app.close()
+  }
+})
+
 test("access request cannot be approved twice", async () => {
   const db = fakeDbForAccessRequest("pending")
   const service = createAccessRequestsService(db.db)
@@ -308,25 +480,32 @@ test("access request cannot be approved after reject or rejected after approve",
 })
 
 async function createTestApp(options: {
+  authenticated?: boolean
   user?: AuthenticatedDomainUser
   permissions?: PermissionService
   services?: Partial<ApiModuleServices>
 } = {}) {
-  return createApiApp({
+  const appOptions: CreateApiAppOptions = {
     config: testConfig(),
     db: fakeDbResources(),
     auth: fakeAuth(),
-    currentUserResolver: async () =>
-      options.user ?? { id: USER_ID, email: "user@example.com", name: "User", status: "active" },
     permissions: options.permissions ?? fakePermissions(),
     services: {
       organizations: fakeOrganizationsService(),
       venues: fakeVenuesService(),
       accessRequests: fakeAccessRequestsService(),
+      platformSupportAudit: fakePlatformSupportAuditService({ ownerUserIds: new Set() }).service,
       ...options.services
     },
     logger: false
-  })
+  } satisfies CreateApiAppOptions
+
+  if (options.authenticated !== false) {
+    appOptions.currentUserResolver = async () =>
+      options.user ?? { id: USER_ID, email: "user@example.com", name: "User", status: "active" }
+  }
+
+  return createApiApp(appOptions)
 }
 
 function fakePermissions(options: {
@@ -445,6 +624,45 @@ function fakeAccessRequest(status: string) {
     venueAccessRole: "karaoke_operator",
     status,
     message: null
+  }
+}
+
+function fakeSupportAuditEvent(
+  overrides: Partial<PlatformSupportAuditEventSummary> = {}
+): PlatformSupportAuditEventSummary {
+  return {
+    id: "88888888-8888-4888-8888-888888888888",
+    createdAt: new Date("2026-06-06T10:00:00.000Z"),
+    actorUserId: USER_ID,
+    targetEventId: EVENT_ID,
+    operation: "dashboard.queue.view",
+    permission: "event.operate_queue",
+    accessType: "platform_owner_support",
+    outcome: "allowed",
+    metadata: { eventStatus: "active" },
+    ...overrides
+  }
+}
+
+function fakePlatformSupportAuditService(options: {
+  events?: PlatformSupportAuditEventSummary[]
+  ownerUserIds: Set<string>
+}): { calls: ListPlatformSupportAuditEventsInput[]; service: PlatformSupportAuditService } {
+  const calls: ListPlatformSupportAuditEventsInput[] = []
+  return {
+    calls,
+    service: {
+      hasActivePlatformOwner: async (userId) => options.ownerUserIds.has(userId),
+      listSupportAuditEvents: async (input) => {
+        calls.push(input)
+        return [...(options.events ?? [])]
+          .filter((event) => input.actorUserId === undefined || event.actorUserId === input.actorUserId)
+          .filter((event) => input.targetEventId === undefined || event.targetEventId === input.targetEventId)
+          .filter((event) => input.operation === undefined || event.operation === input.operation)
+          .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+          .slice(input.offset, input.offset + input.limit)
+      }
+    }
   }
 }
 

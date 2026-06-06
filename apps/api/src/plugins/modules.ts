@@ -7,6 +7,10 @@ import {
   createOrganizationsService,
   type OrganizationsService
 } from "../modules/organizations/service.ts"
+import {
+  createPlatformSupportAuditService,
+  type PlatformSupportAuditService
+} from "../modules/platformSupportAudit/service.ts"
 import { createEventsService, type EventsService } from "../modules/events/service.ts"
 import { createQueueService, type QueueService } from "../modules/queue/service.ts"
 import {
@@ -23,6 +27,7 @@ export type ApiModuleServices = {
   queue: QueueService
   accessRequests: AccessRequestsService
   setup: PlatformSetupService
+  platformSupportAudit: PlatformSupportAuditService
 }
 
 declare module "fastify" {
@@ -33,6 +38,7 @@ declare module "fastify" {
     queue: QueueService
     accessRequests: AccessRequestsService
     setup: PlatformSetupService
+    platformSupportAudit: PlatformSupportAuditService
   }
 }
 
@@ -50,4 +56,5 @@ export async function registerModuleServices(app: FastifyInstance, overrides: Pa
   )
   app.decorate("accessRequests", overrides.accessRequests ?? createAccessRequestsService(app.db))
   app.decorate("setup", overrides.setup ?? createPlatformSetupService(createDbPlatformSetupRepository(app.db)))
+  app.decorate("platformSupportAudit", overrides.platformSupportAudit ?? createPlatformSupportAuditService(app.db))
 }
