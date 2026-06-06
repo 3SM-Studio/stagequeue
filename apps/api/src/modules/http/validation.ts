@@ -18,6 +18,7 @@ export const reservedVenueSlugs = [
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const PUBLIC_ID_PATTERN = /^[A-Za-z0-9_-]{8,80}$/
 
 export function readBody(body: unknown): Record<string, unknown> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -113,6 +114,18 @@ export function readParamUuid(params: unknown, key: string): string {
   }
 
   return validateUuid(String((params as Record<string, unknown>)[key]), key)
+}
+
+export function readParamPublicId(params: unknown, key: string): string {
+  if (typeof params !== "object" || params === null || !(key in params)) {
+    throw badRequest(`Missing ${key}`)
+  }
+
+  const value = String((params as Record<string, unknown>)[key])
+  if (!PUBLIC_ID_PATTERN.test(value)) {
+    throw badRequest(`Invalid ${key}`)
+  }
+  return value
 }
 
 export function readEnum<TValue extends string>(

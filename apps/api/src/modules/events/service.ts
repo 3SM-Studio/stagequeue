@@ -11,6 +11,7 @@ import {
   type DbClient,
   type EventStatus
 } from "@poza-nuta/db"
+import { randomBytes } from "node:crypto"
 import { and, eq, inArray, ne, sql } from "drizzle-orm"
 import { ApiHttpError } from "../../errors.ts"
 import type { DomainEventBus, DomainEventType } from "../../plugins/eventBus.ts"
@@ -25,6 +26,7 @@ import {
 
 export type EventSummary = {
   id: string
+  publicId: string
   venueId: string
   operatedByOrganizationId: string
   createdByUserId: string | null
@@ -170,6 +172,14 @@ const lifecycleTransitions = {
   cancel: { from: ["draft", "scheduled"], to: "cancelled", queueEventType: "event.cancelled" }
 } as const satisfies Record<LifecycleAction, { from: readonly string[]; to: EventStatus; queueEventType: string }>
 
+const EVENT_PUBLIC_ID_BYTES = 8
+const MAX_PUBLIC_ID_GENERATION_ATTEMPTS = 5
+
+// Public event IDs are case-sensitive base64url strings. Keep them separate from internal UUIDs.
+export function generateEventPublicId(): string {
+  return randomBytes(EVENT_PUBLIC_ID_BYTES).toString("base64url")
+}
+
 export function createEventsService(db: DbClient, eventBus?: DomainEventBus): EventsService {
   return {
     async listForUser(userId, options = {}) {
@@ -234,23 +244,18 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
       }
       validateEventDates(input.startsAt, input.endsAt)
 
-      const rows = await mapCreateEventError(async () =>
-        db
-          .insert(events)
-          .values({
-            venueId: input.venueId,
-            operatedByOrganizationId,
-            createdByUserId: input.createdByUserId,
-            name: input.name,
-            slug: input.slug,
-            status: input.status,
-            startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
-            endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
-            publicJoinEnabled: input.publicJoinEnabled ?? false,
-            publicQueueEnabled: input.publicQueueEnabled ?? false
-          })
-          .returning(eventSelection)
-      )
+      const rows = await insertEventWithGeneratedPublicId(db, {
+        venueId: input.venueId,
+        operatedByOrganizationId,
+        createdByUserId: input.createdByUserId,
+        name: input.name,
+        slug: input.slug,
+        status: input.status,
+        startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
+        endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
+        publicJoinEnabled: input.publicJoinEnabled ?? false,
+        publicQueueEnabled: input.publicQueueEnabled ?? false
+      })
 
       if (!rows[0]) {
         throw new Error("Failed to create event")
@@ -508,7 +513,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         .from(events)
         .innerJoin(venues, eq(events.venueId, venues.id))
         .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
-        .where(eq(events.id, eventPublicId))
+        .where(eq(events.publicId, eventPublicId))
         .limit(1)
       const row = rows[0]
       if (!row) {
@@ -524,7 +529,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
       return {
         event: {
           id: row.event.id,
-          publicId: row.event.id,
+          publicId: row.event.publicId,
           name: row.event.name,
           slug: row.event.slug,
           status: row.event.status,
@@ -607,12 +612,30 @@ function validateEventDateRange(startsAt: Date | null, endsAt: Date | null): voi
   }
 }
 
-async function mapCreateEventError<T>(action: () => Promise<T>): Promise<T> {
-  try {
-    return await action()
-  } catch (error) {
-    throw mapEventCreateError(error)
+async function insertEventWithGeneratedPublicId(
+  db: DbClient,
+  input: Omit<typeof events.$inferInsert, "publicId">
+): Promise<EventSummary[]> {
+  let publicIdCollision: unknown
+  for (let attempt = 0; attempt < MAX_PUBLIC_ID_GENERATION_ATTEMPTS; attempt += 1) {
+    try {
+      return await db
+        .insert(events)
+        .values({
+          ...input,
+          publicId: generateEventPublicId()
+        })
+        .returning(eventSelection)
+    } catch (error) {
+      if (isPgUniqueViolation(error) && error.constraint === "events_public_id_unique") {
+        publicIdCollision = error
+        continue
+      }
+      throw mapEventCreateError(error)
+    }
   }
+
+  throw mapEventCreateError(publicIdCollision)
 }
 
 export function mapEventCreateError(error: unknown): unknown {
@@ -622,6 +645,9 @@ export function mapEventCreateError(error: unknown): unknown {
     }
     if (error.constraint === "events_one_active_or_paused_per_venue_unique") {
       return new ApiHttpError(409, "VENUE_HAS_ACTIVE_EVENT", "Venue already has an active or paused event")
+    }
+    if (error.constraint === "events_public_id_unique") {
+      return new ApiHttpError(409, "PUBLIC_EVENT_ID_CONFLICT", "Could not allocate a public event id")
     }
   }
 
@@ -656,6 +682,7 @@ async function getStaffAssignmentById(
 
 const eventSelection = {
   id: events.id,
+  publicId: events.publicId,
   venueId: events.venueId,
   operatedByOrganizationId: events.operatedByOrganizationId,
   createdByUserId: events.createdByUserId,
@@ -679,6 +706,7 @@ const dashboardEventSelection = {
 const publicEventDetailSelection = {
   event: {
     id: events.id,
+    publicId: events.publicId,
     name: events.name,
     slug: events.slug,
     status: events.status,
@@ -714,6 +742,7 @@ type DashboardEventRow = EventSummary & {
 function mapDashboardEventRow(row: DashboardEventRow): DashboardEventSummary {
   return {
     id: row.id,
+    publicId: row.publicId,
     venueId: row.venueId,
     operatedByOrganizationId: row.operatedByOrganizationId,
     createdByUserId: row.createdByUserId,

@@ -4,7 +4,7 @@ import { createApiApp } from "../apps/api/src/app.ts"
 import type { AuthenticatedDomainUser } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
-import { createEventsService, mapEventLifecycleError } from "../apps/api/src/modules/events/service.ts"
+import { createEventsService, generateEventPublicId, mapEventCreateError, mapEventLifecycleError } from "../apps/api/src/modules/events/service.ts"
 import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
 import type {
@@ -39,6 +39,7 @@ test("organization with venue access can create an event", async () => {
 
     assert.equal(response.statusCode, 201)
     assert.equal(response.json().event.slug, "friday")
+    assert.match(response.json().event.publicId, /^[A-Za-z0-9_-]{8,80}$/)
     assert.equal(events.state.events.size, 1)
   } finally {
     await app.close()
@@ -64,6 +65,7 @@ test("platform owner can create an event without operatedByOrganizationId", asyn
     const body = response.json()
 
     assert.equal(response.statusCode, 201)
+    assert.equal(typeof body.event.publicId, "string")
     assert.equal(body.event.slug, "test-karaoke")
     assert.equal(body.event.status, "draft")
     assert.equal(body.event.publicJoinEnabled, false)
@@ -130,6 +132,22 @@ test("create event maps duplicate venue slug to controlled conflict", async () =
   } finally {
     await app.close()
   }
+})
+
+test("event public id generator returns short URL-safe identifiers", () => {
+  const publicId = generateEventPublicId()
+
+  assert.match(publicId, /^[A-Za-z0-9_-]{8,80}$/)
+  assert.equal(publicId.includes("/"), false)
+  assert.equal(publicId.includes("+"), false)
+})
+
+test("create event maps exhausted public id collision to controlled conflict", () => {
+  const error = mapEventCreateError({ code: "23505", constraint: "events_public_id_unique" })
+
+  assert.ok(error instanceof ApiHttpError)
+  assert.equal(error.statusCode, 409)
+  assert.equal(error.code, "PUBLIC_EVENT_ID_CONFLICT")
 })
 
 test("user without create permission cannot create an event", async () => {
@@ -681,7 +699,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
       }
     },
     async getPublicEventById(eventPublicId): Promise<PublicEventDetail | null> {
-      const event = state.events.get(eventPublicId)
+      const event = [...state.events.values()].find((candidate) => candidate.publicId === eventPublicId)
       if (!event || !["scheduled", "active", "paused", "closed"].includes(event.status)) {
         return null
       }
@@ -689,7 +707,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
       return {
         event: {
           id: event.id,
-          publicId: event.id,
+          publicId: event.publicId,
           name: event.name,
           slug: event.slug,
           status: event.status,
@@ -715,6 +733,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
 function makeEvent(id: string, slug: string, status: string): EventSummary {
   return {
     id,
+    publicId: `pub-${slug}`,
     venueId: VENUE_ID,
     operatedByOrganizationId: ORG_ID,
     createdByUserId: USER_ID,

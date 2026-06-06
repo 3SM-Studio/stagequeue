@@ -243,6 +243,7 @@ export const events = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "restrict" }),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    publicId: text("public_id").notNull(),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     status: text("status").notNull().default("draft"),
@@ -254,6 +255,7 @@ export const events = pgTable(
   },
   (table) => [
     unique("events_venue_slug_unique").on(table.venueId, table.slug),
+    unique("events_public_id_unique").on(table.publicId),
     uniqueIndex("events_one_active_or_paused_per_venue_unique")
       .on(table.venueId)
       .where(sql`${table.status} in ('active', 'paused')`),

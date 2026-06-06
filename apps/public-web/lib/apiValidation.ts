@@ -136,6 +136,7 @@ function isPublicEvent(value: unknown): value is PublicEvent {
   return (
     isRecord(value) &&
     isString(value.id) &&
+    isString(value.publicId) &&
     isString(value.venueId) &&
     isString(value.operatedByOrganizationId) &&
     isString(value.name) &&
