@@ -22,6 +22,7 @@ export type Venue = {
 
 export type PublicEvent = {
   id: string
+  publicId: string
   venueId: string
   operatedByOrganizationId: string
   name: string

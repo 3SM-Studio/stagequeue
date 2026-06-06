@@ -29,6 +29,7 @@ import type {
 const USER_ID = "11111111-1111-4111-8111-111111111111"
 const VENUE_ID = "22222222-2222-4222-8222-222222222222"
 const ACTIVE_EVENT_ID = "33333333-3333-4333-8333-333333333333"
+const ACTIVE_EVENT_PUBLIC_ID = "ka2Md-d1das"
 const PAUSED_EVENT_ID = "44444444-4444-4444-8444-444444444444"
 const SCHEDULED_EVENT_ID = "55555555-5555-4555-8555-555555555555"
 const CLOSED_EVENT_ID = "88888888-8888-4888-8888-888888888888"
@@ -395,12 +396,12 @@ test("public event detail returns active public event", async () => {
     events: createEventsService(db.db)
   })
   try {
-    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}` })
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}` })
     const body = response.json()
 
     assert.equal(response.statusCode, 200)
     assert.equal(body.event.id, ACTIVE_EVENT_ID)
-    assert.equal(body.event.publicId, ACTIVE_EVENT_ID)
+    assert.equal(body.event.publicId, ACTIVE_EVENT_PUBLIC_ID)
     assert.equal(body.event.name, "Active Event")
     assert.equal(body.event.status, "active")
     assert.equal(body.event.publicJoinEnabled, true)
@@ -410,6 +411,42 @@ test("public event detail returns active public event", async () => {
     assert.equal(body.operatedByOrganization.slug, "poza-nuta-demo")
     assert.equal(body.submissions.enabled, true)
     assert.equal(body.publicQueue.visible, true)
+  } finally {
+    await app.close()
+  }
+})
+
+test("public event detail does not use internal event id as public id", async () => {
+  const app = await createTestApp({
+    events: {
+      ...fakeEventsService(),
+      getPublicEventById: async (eventPublicId) =>
+        eventPublicId === ACTIVE_EVENT_PUBLIC_ID
+          ? {
+              event: {
+                id: ACTIVE_EVENT_ID,
+                publicId: ACTIVE_EVENT_PUBLIC_ID,
+                name: "Active Event",
+                slug: "active-event",
+                status: "active",
+                startsAt: null,
+                endsAt: null,
+                publicJoinEnabled: true,
+                publicQueueEnabled: true
+              },
+              venue: { id: VENUE_ID, slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
+              operatedByOrganization: { id: "77777777-7777-4777-8777-777777777777", slug: "poza-nuta-demo", name: "Poza Nuta Demo" },
+              submissions: { enabled: true },
+              publicQueue: { visible: true }
+            }
+          : null
+    } as ApiModuleServices["events"]
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}` })
+
+    assert.equal(response.statusCode, 404)
+    assert.equal(response.json().error.code, "NOT_FOUND")
   } finally {
     await app.close()
   }
@@ -435,7 +472,7 @@ test("public event detail hides events from non-public venues and organizations"
       events: createEventsService(db.db)
     })
     try {
-      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}` })
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}` })
 
       assert.equal(response.statusCode, 404)
       assert.equal(response.json().error.code, "NOT_FOUND")
@@ -454,7 +491,7 @@ test("public event detail hides non-public event statuses", async () => {
       events: createEventsService(db.db)
     })
     try {
-      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}` })
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}` })
 
       assert.equal(response.statusCode, 404)
       assert.equal(response.json().error.code, "NOT_FOUND")
@@ -472,7 +509,7 @@ test("public event detail does not expose private queue fields", async () => {
     events: createEventsService(db.db)
   })
   try {
-    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}` })
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}` })
 
     assert.equal(response.statusCode, 200)
     assert.equal(response.body.includes("operator note"), false)
@@ -481,6 +518,16 @@ test("public event detail does not expose private queue fields", async () => {
   } finally {
     await app.close()
   }
+})
+
+test("event public id unique constraint exists in schema and migration", () => {
+  const schemaSource = readFileSync("packages/db/src/schema.ts", "utf8")
+  const migrationSource = readFileSync("packages/db/drizzle/0007_melodic_moira_mactaggert.sql", "utf8")
+
+  assert.match(schemaSource, /events_public_id_unique/)
+  assert.match(migrationSource, /ALTER TABLE "events" ADD COLUMN "public_id" text/)
+  assert.match(migrationSource, /ALTER TABLE "events" ALTER COLUMN "public_id" SET NOT NULL/)
+  assert.match(migrationSource, /events_public_id_unique/)
 })
 
 test("event-id public submit hides events from non-public venues and organizations", async () => {
@@ -1710,6 +1757,7 @@ function makePublicLookup(activeEvent: EventSummary | null): PublicActiveEventLo
 function makePublicEvent(eventId: string, status: string): EventSummary {
   return {
     id: eventId,
+    publicId: `${status}Event1`,
     venueId: VENUE_ID,
     operatedByOrganizationId: "77777777-7777-4777-8777-777777777777",
     createdByUserId: USER_ID,
@@ -1846,6 +1894,7 @@ function fakeDbForPublicEventDetail(event: {
         {
           event: {
             id: ACTIVE_EVENT_ID,
+            publicId: ACTIVE_EVENT_PUBLIC_ID,
             name: "Active Event",
             slug: "active-event",
             status: event.status,

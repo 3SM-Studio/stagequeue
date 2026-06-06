@@ -73,6 +73,7 @@ export type DashboardEventStatus = "draft" | "scheduled" | "active" | "paused" |
 
 export type DashboardEventSummary = {
   id: string
+  publicId: string
   name: string
   slug: string
   status: DashboardEventStatus
@@ -102,6 +103,7 @@ export type DashboardVenueSummary = {
 
 export type DashboardEventDetail = {
   id: string
+  publicId: string
   venueId: string
   operatedByOrganizationId: string
   createdByUserId: string | null
@@ -777,6 +779,7 @@ function isDashboardEventDetail(value: unknown): value is DashboardEventDetail {
 
   return (
     typeof value.id === "string" &&
+    typeof value.publicId === "string" &&
     typeof value.venueId === "string" &&
     typeof value.operatedByOrganizationId === "string" &&
     (typeof value.createdByUserId === "string" || value.createdByUserId === null) &&
@@ -834,6 +837,7 @@ function isDashboardEventSummary(value: unknown): value is DashboardEventSummary
 
   return (
     typeof value.id === "string" &&
+    typeof value.publicId === "string" &&
     typeof value.name === "string" &&
     typeof value.slug === "string" &&
     isDashboardEventStatus(value.status) &&

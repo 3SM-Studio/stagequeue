@@ -74,10 +74,10 @@ test("public-web API client builds event-first public event detail URL", async (
   }
 
   try {
-    const detail = await getPublicEventDetail("33333333-3333-4333-8333-333333333333")
+    const detail = await getPublicEventDetail("ka2Md-d1das")
 
     assert.equal(detail.event.name, "Friday Karaoke")
-    assert.equal(requestedUrl.endsWith("/public/events/33333333-3333-4333-8333-333333333333"), true)
+    assert.equal(requestedUrl.endsWith("/public/events/ka2Md-d1das"), true)
   } finally {
     globalThis.fetch = previousFetch
   }
@@ -200,7 +200,7 @@ test("public-web validates active event API responses", () => {
 })
 
 test("public-web validates public event detail API responses", () => {
-  assert.equal(assertPublicEventDetailResponse(validPublicEventDetailResponse()).event.publicId, "event-1")
+  assert.equal(assertPublicEventDetailResponse(validPublicEventDetailResponse()).event.publicId, "ka2Md-d1das")
   assert.throws(
     () =>
       assertPublicEventDetailResponse({
@@ -397,6 +397,7 @@ test("public-web submit validation requires singer and song fields", () => {
 test("public-web join page policy closes the form when publicJoinEnabled is false", () => {
   const visibility = getJoinVisibility({
     id: "event-1",
+    publicId: "ka2Md-d1das",
     venueId: "venue-1",
     operatedByOrganizationId: "org-1",
     name: "Closed Join",
@@ -425,6 +426,7 @@ test("public-web event-first page maps detail response to view state", () => {
 test("public-web join page policy does not open the form for paused events", () => {
   const visibility = getJoinVisibility({
     id: "event-1",
+    publicId: "ka2Md-d1das",
     venueId: "venue-1",
     operatedByOrganizationId: "org-1",
     name: "Paused Join",
@@ -606,6 +608,7 @@ function validActiveEventResponse() {
     },
     activeEvent: {
       id: "event-1",
+      publicId: "ka2Md-d1das",
       venueId: "venue-1",
       operatedByOrganizationId: "org-1",
       createdByUserId: null,
@@ -624,7 +627,7 @@ function validPublicEventDetailResponse(): PublicEventDetail {
   return {
     event: {
       id: "event-1",
-      publicId: "event-1",
+      publicId: "ka2Md-d1das",
       name: "Friday Karaoke",
       slug: "friday-karaoke",
       status: "active",

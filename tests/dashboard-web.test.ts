@@ -1501,6 +1501,7 @@ function operatorQueuePayload(status = "active") {
 function dashboardEvent(status: DashboardEventSummary["status"], overrides: Partial<DashboardEventSummary> = {}): DashboardEventSummary {
   return {
     id: "event-1",
+    publicId: "ka2Md-d1das",
     name: "Demo Karaoke Night",
     slug: "demo-karaoke",
     status,
@@ -1528,6 +1529,7 @@ function dashboardEventDetail(
 ): DashboardEventDetail {
   return {
     id: "event-1",
+    publicId: "ka2Md-d1das",
     venueId: "venue-1",
     operatedByOrganizationId: "org-1",
     createdByUserId: "user-1",

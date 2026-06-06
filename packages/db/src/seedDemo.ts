@@ -53,6 +53,7 @@ type DemoVenueAccessInput = {
 type DemoEventInput = {
   venueId: string
   operatedByOrganizationId: string
+  publicId: string
   slug: string
   name: string
   status: string
@@ -129,6 +130,7 @@ export function buildDemoSeedData() {
       status: "active"
     },
     event: {
+      publicId: "demoKaraoke1",
       slug: "demo-karaoke",
       name: "Demo Karaoke Night",
       status: "active",
