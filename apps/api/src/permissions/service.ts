@@ -48,6 +48,21 @@ export type PermissionRepository = {
   getOrganizationMembership(userId: string, organizationId: string): Promise<RoleRecord | null>
   getVenueAccessForUser(userId: string, venueId: string): Promise<VenueAccessRecord[]>
   getEventPermissionContext(userId: string, eventId: string): Promise<EventPermissionContext>
+  recordPlatformOwnerEventSupportAccess(input: PlatformOwnerEventSupportAccessAuditInput): Promise<void>
+}
+
+export type PlatformOwnerEventSupportOperation =
+  | "dashboard.event.read"
+  | "dashboard.event.manage"
+  | "dashboard.queue.view"
+  | "dashboard.queue.operate"
+  | "dashboard.queue.stream"
+
+export type PlatformOwnerEventSupportAccessAuditInput = {
+  eventId: string
+  operation: PlatformOwnerEventSupportOperation
+  permission: VenueEventPermission
+  userId: string
 }
 
 export type PermissionService = {
@@ -59,6 +74,18 @@ export type PermissionService = {
   requireVenuePermission(userId: string, venueId: string, permission: VenueEventPermission): Promise<void>
   hasEventPermission(userId: string, eventId: string, permission: VenueEventPermission): Promise<boolean>
   requireEventPermission(userId: string, eventId: string, permission: VenueEventPermission): Promise<void>
+  hasPlatformOwnerEventSupportAccess(
+    userId: string,
+    eventId: string,
+    permission: VenueEventPermission,
+    operation: PlatformOwnerEventSupportOperation
+  ): Promise<boolean>
+  requirePlatformOwnerEventSupportAccess(
+    userId: string,
+    eventId: string,
+    permission: VenueEventPermission,
+    operation: PlatformOwnerEventSupportOperation
+  ): Promise<void>
 }
 
 export function createPermissionService(repository: PermissionRepository): PermissionService {
@@ -92,10 +119,6 @@ export function createPermissionService(repository: PermissionRepository): Permi
       return false
     }
 
-    if (isEventScopedPermission(permission) && (await hasPlatformOwnerSupportAccess(userId))) {
-      return true
-    }
-
     if (!context.organizationMembership || !isActive(context.organizationMembership.status)) {
       return false
     }
@@ -114,6 +137,30 @@ export function createPermissionService(repository: PermissionRepository): Permi
     )
   }
 
+  async function hasPlatformOwnerEventSupportAccess(
+    userId: string,
+    eventId: string,
+    permission: VenueEventPermission,
+    operation: PlatformOwnerEventSupportOperation
+  ): Promise<boolean> {
+    if (!isSupportOperationAllowed(operation, permission)) {
+      return false
+    }
+
+    const context = await repository.getEventPermissionContext(userId, eventId)
+    if (!context.event || !(await hasPlatformOwnerSupportAccess(userId))) {
+      return false
+    }
+
+    await repository.recordPlatformOwnerEventSupportAccess({
+      eventId,
+      operation,
+      permission,
+      userId
+    })
+    return true
+  }
+
   return {
     hasPlatformPermission,
     requirePlatformPermission: requirePermission(() => hasPlatformPermission, "platform"),
@@ -122,7 +169,9 @@ export function createPermissionService(repository: PermissionRepository): Permi
     hasVenuePermission,
     requireVenuePermission: requirePermission(() => hasVenuePermission, "venue"),
     hasEventPermission,
-    requireEventPermission: requirePermission(() => hasEventPermission, "event")
+    requireEventPermission: requirePermission(() => hasEventPermission, "event"),
+    hasPlatformOwnerEventSupportAccess,
+    requirePlatformOwnerEventSupportAccess: requirePermission(() => hasPlatformOwnerEventSupportAccess, "event")
   }
 }
 
@@ -226,6 +275,10 @@ export function createDrizzlePermissionRepository(db: DbClient): PermissionRepos
         venueAccess: venueAccessRows,
         eventStaffAssignments: staffRows
       }
+    },
+
+    async recordPlatformOwnerEventSupportAccess() {
+      // Central hook for C3 support-access audit. The DB audit sink is intentionally deferred until an audit-log table exists.
     }
   }
 }
@@ -246,6 +299,22 @@ function isActive(status: string): boolean {
   return status === "active"
 }
 
-function isEventScopedPermission(permission: VenueEventPermission): boolean {
-  return permission.startsWith("event.")
+function isSupportOperationAllowed(
+  operation: PlatformOwnerEventSupportOperation,
+  permission: VenueEventPermission
+): boolean {
+  if (operation === "dashboard.event.read") {
+    return permission === "event.view_stats"
+  }
+  if (operation === "dashboard.queue.view" || operation === "dashboard.queue.stream") {
+    return permission === "event.view_stats" || permission === "event.operate_queue" || permission === "event.manage"
+  }
+  if (operation === "dashboard.event.manage") {
+    return permission === "event.manage"
+  }
+  if (operation === "dashboard.queue.operate") {
+    return permission === "event.operate_queue" || permission === "event.manage"
+  }
+
+  return false
 }

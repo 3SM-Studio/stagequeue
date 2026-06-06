@@ -1,5 +1,6 @@
 import {
   events,
+  organizations,
   queueEvents,
   songRequests,
   songSources,
@@ -190,7 +191,7 @@ export function createQueueService(db: DbClient, eventBus?: DomainEventBus, anti
 
   return {
     async getPublicQueue(eventId) {
-      const context = await getEventContext(db, eventId)
+      const context = await getPublicEventContext(db, eventId)
       assertPublicQueueVisible(context.event)
 
       const now = await getCurrentRequest(db, eventId)
@@ -208,7 +209,7 @@ export function createQueueService(db: DbClient, eventBus?: DomainEventBus, anti
     },
 
     async listParticipantRequests(eventId, participantTokenHash) {
-      await getEventContext(db, eventId)
+      await getPublicEventContext(db, eventId)
       const rows = await db
         .select(songRequestSelection)
         .from(songRequests)
@@ -221,7 +222,7 @@ export function createQueueService(db: DbClient, eventBus?: DomainEventBus, anti
     async submitPublicRequest(eventId, input) {
       const request = await inTransaction(db, async (tx) => {
         await lockQueueForEvent(tx, eventId)
-        const context = await getEventContext(tx, eventId)
+        const context = await getPublicEventContext(tx, eventId)
         if (context.event.status !== "active" || !context.event.publicJoinEnabled) {
           throw new ApiHttpError(409, "CONFLICT", "Event is not accepting public song requests")
         }
@@ -506,11 +507,18 @@ async function getEventContext(db: DbClient, eventId: string) {
       venue: {
         id: venues.id,
         name: venues.name,
-        slug: venues.slug
+        slug: venues.slug,
+        status: venues.status,
+        verificationStatus: venues.verificationStatus
+      },
+      organization: {
+        id: organizations.id,
+        status: organizations.status
       }
     })
     .from(events)
     .innerJoin(venues, eq(events.venueId, venues.id))
+    .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
     .where(eq(events.id, eventId))
     .limit(1)
 
@@ -520,6 +528,22 @@ async function getEventContext(db: DbClient, eventId: string) {
   }
 
   return context
+}
+
+async function getPublicEventContext(db: DbClient, eventId: string): Promise<Awaited<ReturnType<typeof getEventContext>>> {
+  const context = await getEventContext(db, eventId)
+  assertPublicEventContextVisible(context)
+  return context
+}
+
+function assertPublicEventContextVisible(context: Awaited<ReturnType<typeof getEventContext>>): void {
+  if (
+    context.venue.status !== "active" ||
+    context.venue.verificationStatus !== "verified" ||
+    context.organization.status !== "active"
+  ) {
+    throw new ApiHttpError(404, "NOT_FOUND", "Missing event")
+  }
 }
 
 async function requireMutableEvent(db: DbClient, eventId: string): Promise<Awaited<ReturnType<typeof getEventContext>>> {

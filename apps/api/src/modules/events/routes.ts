@@ -88,8 +88,13 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
   app.get("/dashboard/events/:eventId", async (request) => {
     const user = await requireCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
-    const isPlatformAllowed = await app.permissions.hasPlatformPermission(user.id, "platform.manage_venues")
-    if (!isPlatformAllowed && !(await app.permissions.hasEventPermission(user.id, eventId, "event.view_stats"))) {
+    const canSupport = await app.permissions.hasPlatformOwnerEventSupportAccess(
+      user.id,
+      eventId,
+      "event.view_stats",
+      "dashboard.event.read"
+    )
+    if (!canSupport && !(await app.permissions.hasEventPermission(user.id, eventId, "event.view_stats"))) {
       throw forbidden()
     }
 
@@ -104,7 +109,7 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
   app.patch("/dashboard/events/:eventId", async (request) => {
     const user = await requireActiveCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
-    await requireEventManageOrPlatform(app, user.id, eventId)
+    await requireEventManageOrSupport(app, user.id, eventId)
 
     const body = readBody(request.body)
     const patchInput: PatchEventInput = {}
@@ -142,7 +147,7 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     app.post(`/dashboard/events/:eventId/${action}`, async (request) => {
       const user = await requireActiveCurrentUser(request)
       const eventId = readParamUuid(request.params, "eventId")
-      await requireEventManageOrPlatform(app, user.id, eventId)
+      await requireEventManageOrSupport(app, user.id, eventId)
 
       return { event: await app.events.changeLifecycle(eventId, action, user.id) }
     })
@@ -151,8 +156,13 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
   app.get("/dashboard/events/:eventId/staff", async (request) => {
     const user = await requireCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
-    const isPlatformAllowed = await app.permissions.hasPlatformPermission(user.id, "platform.manage_venues")
-    if (!isPlatformAllowed && !(await app.permissions.hasEventPermission(user.id, eventId, "event.view_stats"))) {
+    const canSupport = await app.permissions.hasPlatformOwnerEventSupportAccess(
+      user.id,
+      eventId,
+      "event.view_stats",
+      "dashboard.event.read"
+    )
+    if (!canSupport && !(await app.permissions.hasEventPermission(user.id, eventId, "event.view_stats"))) {
       throw forbidden()
     }
 
@@ -162,7 +172,7 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
   app.post("/dashboard/events/:eventId/staff", async (request, reply) => {
     const user = await requireActiveCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
-    await requireEventManageOrPlatform(app, user.id, eventId)
+    await requireEventManageOrSupport(app, user.id, eventId)
 
     const body = readBody(request.body)
     const staffUserId = readOptionalUuid(body, "userId")
@@ -185,7 +195,7 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     const user = await requireActiveCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
     const assignmentId = readParamUuid(request.params, "assignmentId")
-    await requireEventManageOrPlatform(app, user.id, eventId)
+    await requireEventManageOrSupport(app, user.id, eventId)
 
     const body = readBody(request.body)
     const patchInput: PatchEventStaffInput = {}
@@ -206,7 +216,7 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     const user = await requireActiveCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
     const assignmentId = readParamUuid(request.params, "assignmentId")
-    await requireEventManageOrPlatform(app, user.id, eventId)
+    await requireEventManageOrSupport(app, user.id, eventId)
 
     return { assignment: await app.events.removeStaffAssignment(eventId, assignmentId) }
   })
@@ -224,13 +234,16 @@ export async function registerEventPublicRoutes(app: FastifyInstance): Promise<v
   })
 }
 
-async function requireEventManageOrPlatform(app: FastifyInstance, userId: string, eventId: string): Promise<void> {
-  const isPlatformAllowed = await app.permissions.hasPlatformPermission(userId, "platform.manage_venues")
-  if (isPlatformAllowed) {
+async function requireEventManageOrSupport(app: FastifyInstance, userId: string, eventId: string): Promise<void> {
+  if (await app.permissions.hasEventPermission(userId, eventId, "event.manage")) {
     return
   }
 
-  await app.permissions.requireEventPermission(userId, eventId, "event.manage")
+  if (await app.permissions.hasPlatformOwnerEventSupportAccess(userId, eventId, "event.manage", "dashboard.event.manage")) {
+    return
+  }
+
+  throw forbidden()
 }
 
 function forbidden(): ApiHttpError {

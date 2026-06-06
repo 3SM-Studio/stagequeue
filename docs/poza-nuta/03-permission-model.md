@@ -52,6 +52,17 @@ Dashboard users require:
 
 Platform owner can perform platform-level operations, but actions still should be audited. Platform owner bypasses must be explicit and commented/testable.
 
+For event and queue support, platform owner access must not be folded into normal tenant-scoped `hasEventPermission`.
+Use the explicit platform-owner event support override policy for these MVP operations:
+
+- `dashboard.event.read`
+- `dashboard.event.manage`
+- `dashboard.queue.view`
+- `dashboard.queue.operate`
+- `dashboard.queue.stream`
+
+Mutating support operations remain allowed for MVP so the first platform owner can support/demo operator workflows, but they must pass through the central support override and audit hook. Future production hardening may split this into narrower audited support roles or impersonation.
+
 ## Policy functions
 
 Recommended policy names:

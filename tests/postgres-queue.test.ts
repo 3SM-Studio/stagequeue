@@ -381,6 +381,41 @@ test("public submit is blocked when publicJoinEnabled is false", async () => {
   }
 })
 
+test("event-id public submit hides events from non-public venues and organizations", async () => {
+  for (const hiddenContext of [
+    { venueStatus: "draft" },
+    { venueStatus: "archived" },
+    { venueVerificationStatus: "pending" },
+    { venueVerificationStatus: "rejected" },
+    { organizationStatus: "pending" },
+    { organizationStatus: "archived" }
+  ]) {
+    const db = fakeDbForQueueEventContext({
+      status: "active",
+      publicJoinEnabled: true,
+      publicQueueEnabled: true,
+      ...hiddenContext
+    })
+    const app = await createTestApp({
+      db,
+      queue: createQueueService(db.db)
+    })
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+        payload: publicSubmitPayload()
+      })
+
+      assert.equal(response.statusCode, 404)
+      assert.equal(response.json().error.code, "NOT_FOUND")
+      assert.equal(response.json().error.message, "Missing event")
+    } finally {
+      await app.close()
+    }
+  }
+})
+
 test("public queue shows now and approved queue without private notes", async () => {
   const queue = createInMemoryQueueService()
   const approved = queue.addRequest(ACTIVE_EVENT_ID, "approved", { position: 1, note: "private operator note" })
@@ -427,6 +462,37 @@ test("public queue is forbidden when publicQueueEnabled is false", async () => {
     assert.equal(response.json().error.message, "Public queue is disabled for this event")
   } finally {
     await app.close()
+  }
+})
+
+test("event-id public queue hides events from non-public venues and organizations", async () => {
+  for (const hiddenContext of [
+    { venueStatus: "draft" },
+    { venueStatus: "archived" },
+    { venueVerificationStatus: "pending" },
+    { venueVerificationStatus: "rejected" },
+    { organizationStatus: "pending" },
+    { organizationStatus: "archived" }
+  ]) {
+    const db = fakeDbForQueueEventContext({
+      status: "active",
+      publicJoinEnabled: true,
+      publicQueueEnabled: true,
+      ...hiddenContext
+    })
+    const app = await createTestApp({
+      db,
+      queue: createQueueService(db.db)
+    })
+    try {
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+
+      assert.equal(response.statusCode, 404)
+      assert.equal(response.json().error.code, "NOT_FOUND")
+      assert.equal(response.json().error.message, "Missing event")
+    } finally {
+      await app.close()
+    }
   }
 })
 
@@ -1407,9 +1473,10 @@ function fakePermissions(options: { event?: Set<string>; platformOwner?: boolean
     requireOrganizationPermission: async () => requireAllowed(false),
     hasVenuePermission: async () => false,
     requireVenuePermission: async () => requireAllowed(false),
-    hasEventPermission: async (_userId, _eventId, permission) => hasPlatformSupportAccess || Boolean(options.event?.has(permission)),
-    requireEventPermission: async (_userId, _eventId, permission) =>
-      requireAllowed(hasPlatformSupportAccess || options.event?.has(permission))
+    hasEventPermission: async (_userId, _eventId, permission) => Boolean(options.event?.has(permission)),
+    requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission)),
+    hasPlatformOwnerEventSupportAccess: async () => hasPlatformSupportAccess,
+    requirePlatformOwnerEventSupportAccess: async () => requireAllowed(hasPlatformSupportAccess)
   }
 }
 
@@ -1504,6 +1571,9 @@ function fakeDbForQueueEventContext(event: {
   status: string
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  venueStatus?: string
+  venueVerificationStatus?: string
+  organizationStatus?: string
 }): DbResources {
   return fakeDbResourcesWithClient({
     select: () =>
@@ -1519,7 +1589,13 @@ function fakeDbForQueueEventContext(event: {
           venue: {
             id: VENUE_ID,
             name: "Klub X",
-            slug: "klub-x"
+            slug: "klub-x",
+            status: event.venueStatus ?? "active",
+            verificationStatus: event.venueVerificationStatus ?? "verified"
+          },
+          organization: {
+            id: "77777777-7777-4777-8777-777777777777",
+            status: event.organizationStatus ?? "active"
           }
         }
       ])
@@ -1546,7 +1622,13 @@ function fakeDbForPublicQueueStatus(status: string): DbResources {
             venue: {
               id: VENUE_ID,
               name: "Klub X",
-              slug: "klub-x"
+              slug: "klub-x",
+              status: "active",
+              verificationStatus: "verified"
+            },
+            organization: {
+              id: "77777777-7777-4777-8777-777777777777",
+              status: "active"
             }
           }
         ])

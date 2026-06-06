@@ -106,11 +106,7 @@ export async function registerQueuePublicRoutes(app: FastifyInstance): Promise<v
 
   app.get("/public/events/:eventPublicId/stream", async (request, reply) => {
     const eventId = readParamUuid(request.params, "eventPublicId")
-    const event = await app.events.getById(eventId)
-    if (!event) {
-      throw new ApiHttpError(404, "NOT_FOUND", "Missing event")
-    }
-    assertPublicQueueVisible(event)
+    await app.queue.getPublicQueue(eventId)
 
     return startEventStream(app, reply, {
       channel: app.eventBus.eventChannel(eventId),
@@ -211,7 +207,13 @@ async function readOperatorActionContext(app: FastifyInstance, request: FastifyR
 async function requireQueueOperatorPermission(app: FastifyInstance, userId: string, eventId: string): Promise<void> {
   const canOperate = await app.permissions.hasEventPermission(userId, eventId, "event.operate_queue")
   const canManage = await app.permissions.hasEventPermission(userId, eventId, "event.manage")
-  if (!canOperate && !canManage) {
+  const canSupport = await app.permissions.hasPlatformOwnerEventSupportAccess(
+    userId,
+    eventId,
+    "event.operate_queue",
+    "dashboard.queue.operate"
+  )
+  if (!canOperate && !canManage && !canSupport) {
     throw new ApiHttpError(403, "FORBIDDEN", "Forbidden")
   }
 }
@@ -220,7 +222,13 @@ async function requireQueueStreamPermission(app: FastifyInstance, userId: string
   const canView = await app.permissions.hasEventPermission(userId, eventId, "event.view_stats")
   const canOperate = await app.permissions.hasEventPermission(userId, eventId, "event.operate_queue")
   const canManage = await app.permissions.hasEventPermission(userId, eventId, "event.manage")
-  if (!canView && !canOperate && !canManage) {
+  const canSupport = await app.permissions.hasPlatformOwnerEventSupportAccess(
+    userId,
+    eventId,
+    "event.view_stats",
+    "dashboard.queue.stream"
+  )
+  if (!canView && !canOperate && !canManage && !canSupport) {
     throw new ApiHttpError(403, "FORBIDDEN", "Forbidden")
   }
 }

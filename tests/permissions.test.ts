@@ -20,6 +20,7 @@ import {
   createPermissionService,
   type EventPermissionContext,
   type PermissionRepository,
+  type PlatformOwnerEventSupportAccessAuditInput,
   type RoleRecord,
   type VenueAccessRecord
 } from "../apps/api/src/permissions/service.ts"
@@ -127,9 +128,11 @@ test("event lead_host has event.manage through event staff role mapping", async 
   assert.equal(await service.hasEventPermission("lead-host", "event-1", "event.manage"), true)
 })
 
-test("platform owner has MVP support access to operator event permissions", async () => {
+test("platform owner event access uses explicit support override", async () => {
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
   const service = createPermissionService(
     fakeRepository({
+      supportAccessAudit,
       platformMemberships: {
         "platform-owner": [{ role: "platform_owner", status: "active" }]
       },
@@ -149,9 +152,47 @@ test("platform owner has MVP support access to operator event permissions", asyn
     })
   )
 
-  assert.equal(await service.hasEventPermission("platform-owner", "event-1", "event.view_stats"), true)
-  assert.equal(await service.hasEventPermission("platform-owner", "event-1", "event.operate_queue"), true)
-  assert.equal(await service.hasEventPermission("platform-owner", "event-1", "event.manage"), true)
+  assert.equal(await service.hasEventPermission("platform-owner", "event-1", "event.view_stats"), false)
+  assert.equal(
+    await service.hasPlatformOwnerEventSupportAccess(
+      "platform-owner",
+      "event-1",
+      "event.view_stats",
+      "dashboard.event.read"
+    ),
+    true
+  )
+  assert.equal(
+    await service.hasPlatformOwnerEventSupportAccess(
+      "platform-owner",
+      "event-1",
+      "event.operate_queue",
+      "dashboard.queue.operate"
+    ),
+    true
+  )
+  assert.equal(
+    await service.hasPlatformOwnerEventSupportAccess(
+      "platform-owner",
+      "event-1",
+      "event.manage",
+      "dashboard.event.manage"
+    ),
+    true
+  )
+  assert.equal(
+    await service.hasPlatformOwnerEventSupportAccess(
+      "platform-owner",
+      "event-1",
+      "event.operate_queue",
+      "dashboard.event.manage"
+    ),
+    false
+  )
+  assert.deepEqual(
+    supportAccessAudit.map((entry) => entry.operation),
+    ["dashboard.event.read", "dashboard.queue.operate", "dashboard.event.manage"]
+  )
 })
 
 test("platform owner event permission still requires an existing event", async () => {
@@ -207,6 +248,7 @@ type FakeRepositoryInput = {
   organizationMemberships?: Record<string, RoleRecord>
   venueAccessByUser?: Record<string, VenueAccessRecord[]>
   eventContexts?: Record<string, EventPermissionContext>
+  supportAccessAudit?: PlatformOwnerEventSupportAccessAuditInput[]
 }
 
 function fakeRepository(input: FakeRepositoryInput = {}): PermissionRepository {
@@ -229,6 +271,9 @@ function fakeRepository(input: FakeRepositoryInput = {}): PermissionRepository {
           eventStaffAssignments: []
         }
       )
+    },
+    async recordPlatformOwnerEventSupportAccess(auditInput) {
+      input.supportAccessAudit?.push(auditInput)
     }
   }
 }

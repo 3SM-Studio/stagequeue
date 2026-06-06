@@ -161,6 +161,30 @@ test("public stream is hidden for archived and cancelled events", async () => {
   }
 })
 
+test("event-id public stream hides events from non-public venues and organizations", async () => {
+  for (const publicContext of [
+    { venueStatus: "draft" },
+    { venueStatus: "archived" },
+    { venueVerificationStatus: "pending" },
+    { venueVerificationStatus: "rejected" },
+    { organizationStatus: "pending" },
+    { organizationStatus: "archived" }
+  ]) {
+    const app = await createTestApp({ publicContext })
+    try {
+      const response = await app.inject({ method: "GET", url: `/public/events/${EVENT_ID}/stream` })
+
+      assert.equal(response.statusCode, 404)
+      assert.equal(response.json().error.code, "NOT_FOUND")
+      assert.equal(response.json().error.message, "Missing event")
+      assert.equal(response.headers["content-type"], "application/json; charset=utf-8")
+      assert.equal(app.eventBus.subscriberCount(app.eventBus.eventChannel(EVENT_ID)), 0)
+    } finally {
+      await app.close()
+    }
+  }
+})
+
 test("dashboard stream without auth returns unauthorized", async () => {
   const app = await createTestApp({ authenticated: false })
   try {
@@ -262,10 +286,19 @@ test("platform catalog import stream requires platform catalog permission", asyn
   }
 })
 
-async function createTestApp(options: { authenticated?: boolean; permissions?: PermissionService; event?: EventSummary | null } = {}) {
+async function createTestApp(options: {
+  authenticated?: boolean
+  permissions?: PermissionService
+  event?: EventSummary | null
+  publicContext?: {
+    venueStatus?: string
+    venueVerificationStatus?: string
+    organizationStatus?: string
+  }
+} = {}) {
   const appOptions: CreateApiAppOptions = {
     config: testConfig(),
-    db: fakeDbResources(),
+    db: fakeDbResources(options.event ?? makeEvent("active"), options.publicContext),
     auth: fakeAuth(),
     permissions: options.permissions ?? fakePermissions({ event: new Set(["event.view_stats"]), platform: new Set(["platform.manage_catalog"]) }),
     services: {
@@ -291,7 +324,7 @@ function fakeDbForApprove(): DbClient {
     select: () => {
       selectCount += 1
       if (selectCount === 1) {
-        return queryChain([{ event: eventContext().event, venue: eventContext().venue }])
+        return queryChain([eventContext()])
       }
       if (selectCount === 2) {
         return queryChain([request])
@@ -373,7 +406,13 @@ function eventContext() {
     venue: {
       id: VENUE_ID,
       name: "Klub X",
-      slug: "klub-x"
+      slug: "klub-x",
+      status: "active",
+      verificationStatus: "verified"
+    },
+    organization: {
+      id: ORG_ID,
+      status: "active"
     }
   }
 }
@@ -429,9 +468,10 @@ function fakePermissions(options: { event?: Set<string>; platform?: Set<string>;
     requireOrganizationPermission: async () => requireAllowed(false),
     hasVenuePermission: async () => false,
     requireVenuePermission: async () => requireAllowed(false),
-    hasEventPermission: async (_userId, _eventId, permission) => hasPlatformSupportAccess || Boolean(options.event?.has(permission)),
-    requireEventPermission: async (_userId, _eventId, permission) =>
-      requireAllowed(hasPlatformSupportAccess || options.event?.has(permission))
+    hasEventPermission: async (_userId, _eventId, permission) => Boolean(options.event?.has(permission)),
+    requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission)),
+    hasPlatformOwnerEventSupportAccess: async () => hasPlatformSupportAccess,
+    requirePlatformOwnerEventSupportAccess: async () => requireAllowed(hasPlatformSupportAccess)
   }
 }
 
@@ -466,10 +506,49 @@ function fakeAccessRequestsService(): ApiModuleServices["accessRequests"] {
   return {} as ApiModuleServices["accessRequests"]
 }
 
-function fakeDbResources(): DbResources {
+function fakeDbResources(
+  event: EventSummary,
+  publicContext: {
+    venueStatus?: string
+    venueVerificationStatus?: string
+    organizationStatus?: string
+  } = {}
+): DbResources {
+  let selectCount = 0
   return {
     db: {
-      execute: async () => []
+      execute: async () => [],
+      select: () => {
+        selectCount += 1
+        if (selectCount === 1) {
+          return queryChain([
+            {
+              event: {
+                id: event.id,
+                venueId: event.venueId,
+                operatedByOrganizationId: event.operatedByOrganizationId,
+                name: event.name,
+                status: event.status,
+                publicJoinEnabled: event.publicJoinEnabled,
+                publicQueueEnabled: event.publicQueueEnabled
+              },
+              venue: {
+                id: VENUE_ID,
+                name: "Klub X",
+                slug: "klub-x",
+                status: publicContext.venueStatus ?? "active",
+                verificationStatus: publicContext.venueVerificationStatus ?? "verified"
+              },
+              organization: {
+                id: ORG_ID,
+                status: publicContext.organizationStatus ?? "active"
+              }
+            }
+          ])
+        }
+
+        return queryChain([])
+      }
     } as unknown as DbResources["db"],
     pool: {
       end: async () => undefined
