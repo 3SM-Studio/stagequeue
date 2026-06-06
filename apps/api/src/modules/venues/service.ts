@@ -9,6 +9,7 @@ import {
 } from "@poza-nuta/db"
 import { and, eq, sql } from "drizzle-orm"
 import { ApiHttpError } from "../../errors.ts"
+import { isPublicVenueVisible } from "../publicVisibility.ts"
 
 export type VenueSummary = {
   id: string
@@ -283,7 +284,7 @@ export const allowedVenueAccessRoles = venueAccessRoles
 export const allowedVenueVerificationStatuses = venueVerificationStatuses
 
 export function isVenuePubliclyVisible(venue: Pick<VenueSummary, "status" | "verificationStatus">): boolean {
-  return venue.status === "active" && venue.verificationStatus === "verified"
+  return isPublicVenueVisible(venue)
 }
 
 const venueSelection = {

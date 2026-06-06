@@ -499,6 +499,41 @@ test("event-id public queue hides events from non-public venues and organization
   }
 })
 
+test("venue-first and event-id public queue share venue and organization visibility policy", async () => {
+  for (const hiddenContext of [
+    { venueStatus: "draft" },
+    { venueStatus: "archived" },
+    { venueVerificationStatus: "pending" },
+    { venueVerificationStatus: "rejected" },
+    { organizationStatus: "pending" },
+    { organizationStatus: "archived" }
+  ]) {
+    const db = fakeDbForQueueEventContext({
+      status: "active",
+      publicJoinEnabled: true,
+      publicQueueEnabled: true,
+      ...hiddenContext
+    })
+    const app = await createTestApp({
+      db,
+      queue: createQueueService(db.db),
+      events: fakeEventsService({ lookup: makePublicLookup(makePublicEvent(ACTIVE_EVENT_ID, "active")) })
+    })
+    try {
+      const venueFirst = await app.inject({ method: "GET", url: "/public/venues/klub-x/queue" })
+      const eventId = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+
+      for (const response of [venueFirst, eventId]) {
+        assert.equal(response.statusCode, 404)
+        assert.equal(response.json().error.code, "NOT_FOUND")
+        assert.equal(response.json().error.message, "Missing event")
+      }
+    } finally {
+      await app.close()
+    }
+  }
+})
+
 test("public queue snapshot is visible for active paused and closed events", async () => {
   for (const status of ["active", "paused", "closed"]) {
     const db = fakeDbForPublicQueueStatus(status)
@@ -534,6 +569,33 @@ test("public queue snapshot is hidden for archived and cancelled events", async 
       assert.equal(response.statusCode, 409)
       assert.equal(response.json().error.code, "CONFLICT")
       assert.equal(response.json().error.message, "Queue is not active for this event")
+    } finally {
+      await app.close()
+    }
+  }
+})
+
+test("venue-first and event-id public queue share archived and cancelled policy", async () => {
+  for (const status of ["archived", "cancelled"]) {
+    const db = fakeDbForQueueEventContext({
+      status,
+      publicJoinEnabled: true,
+      publicQueueEnabled: true
+    })
+    const app = await createTestApp({
+      db,
+      queue: createQueueService(db.db),
+      events: fakeEventsService({ lookup: makePublicLookup(makePublicEvent(ACTIVE_EVENT_ID, status)) })
+    })
+    try {
+      const venueFirst = await app.inject({ method: "GET", url: "/public/venues/klub-x/queue" })
+      const eventId = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+
+      for (const response of [venueFirst, eventId]) {
+        assert.equal(response.statusCode, 409)
+        assert.equal(response.json().error.code, "CONFLICT")
+        assert.equal(response.json().error.message, "Queue is not active for this event")
+      }
     } finally {
       await app.close()
     }
