@@ -10,6 +10,7 @@ import {
 import { and, asc, desc, eq, sql } from "drizzle-orm"
 import { ApiHttpError } from "../../errors.ts"
 import type { DomainEventBus } from "../../plugins/eventBus.ts"
+import { assertPublicEventContainerVisible, assertPublicQueueVisible } from "../publicVisibility.ts"
 
 export type QueueSongRequest = {
   id: string
@@ -161,24 +162,8 @@ type QueueEventType =
   | "request.skipped"
   | "request.moved"
 
-const publicQueueVisibleStatuses = ["active", "paused", "closed"] as const
 const mutableQueueStatuses = ["active", "paused"] as const
 const activeParticipantRequestStatuses = ["pending", "approved", "now"] as const
-
-export type PublicQueueVisibilityEvent = {
-  status: string
-  publicQueueEnabled: boolean
-}
-
-export function assertPublicQueueVisible(event: PublicQueueVisibilityEvent): void {
-  if (!event.publicQueueEnabled) {
-    throw new ApiHttpError(403, "FORBIDDEN", "Public queue is disabled for this event")
-  }
-
-  if (!publicQueueVisibleStatuses.includes(event.status as (typeof publicQueueVisibleStatuses)[number])) {
-    throw new ApiHttpError(409, "CONFLICT", "Queue is not active for this event")
-  }
-}
 
 export function createQueueService(db: DbClient, eventBus?: DomainEventBus, antiSpamConfig: QueueAntiSpamConfig = {
   maxActivePerParticipant: 3,
@@ -537,13 +522,7 @@ async function getPublicEventContext(db: DbClient, eventId: string): Promise<Awa
 }
 
 function assertPublicEventContextVisible(context: Awaited<ReturnType<typeof getEventContext>>): void {
-  if (
-    context.venue.status !== "active" ||
-    context.venue.verificationStatus !== "verified" ||
-    context.organization.status !== "active"
-  ) {
-    throw new ApiHttpError(404, "NOT_FOUND", "Missing event")
-  }
+  assertPublicEventContainerVisible(context)
 }
 
 async function requireMutableEvent(db: DbClient, eventId: string): Promise<Awaited<ReturnType<typeof getEventContext>>> {

@@ -14,7 +14,7 @@ import {
 import { and, eq, inArray, ne, sql } from "drizzle-orm"
 import { ApiHttpError } from "../../errors.ts"
 import type { DomainEventBus, DomainEventType } from "../../plugins/eventBus.ts"
-import { isVenuePubliclyVisible } from "../venues/service.ts"
+import { isPublicOrganizationVisible, isPublicVenueVisible } from "../publicVisibility.ts"
 
 export type EventSummary = {
   id: string
@@ -428,15 +428,25 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         .where(eq(venues.slug, venueSlug))
         .limit(1)
       const venue = venueRows[0]
-      if (!venue || !isVenuePubliclyVisible(venue)) {
+      if (!venue || !isPublicVenueVisible(venue)) {
         return null
       }
 
       const activeRows = await db
-        .select(eventSelection)
+        .select({
+          event: eventSelection,
+          organization: {
+            status: organizations.status
+          }
+        })
         .from(events)
+        .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
         .where(and(eq(events.venueId, venue.id), inArray(events.status, ["active", "paused"])))
         .limit(1)
+      const active = activeRows[0]
+      if (active && !isPublicOrganizationVisible(active.organization)) {
+        return null
+      }
 
       return {
         venue: {
@@ -446,7 +456,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           city: venue.city,
           timezone: venue.timezone
         },
-        activeEvent: activeRows[0] ?? null
+        activeEvent: active?.event ?? null
       }
     }
   }

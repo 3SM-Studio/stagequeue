@@ -188,6 +188,63 @@ test("event-id public stream hides events from non-public venues and organizatio
   }
 })
 
+test("venue-first public stream uses the shared venue and organization visibility policy", async () => {
+  for (const publicContext of [
+    { venueStatus: "draft" },
+    { venueStatus: "archived" },
+    { venueVerificationStatus: "pending" },
+    { venueVerificationStatus: "rejected" },
+    { organizationStatus: "pending" },
+    { organizationStatus: "archived" }
+  ]) {
+    const app = await createTestApp({ publicContext })
+    try {
+      const response = await app.inject({ method: "GET", url: "/public/venues/klub-x/stream" })
+
+      assert.equal(response.statusCode, 404)
+      assert.equal(response.json().error.code, "NOT_FOUND")
+      assert.equal(response.json().error.message, "Missing event")
+      assert.equal(response.headers["content-type"], "application/json; charset=utf-8")
+      assert.equal(app.eventBus.subscriberCount(app.eventBus.eventChannel(EVENT_ID)), 0)
+    } finally {
+      await app.close()
+    }
+  }
+})
+
+test("venue-first public stream uses the shared event status and public queue flag policy", async () => {
+  for (const status of ["archived", "cancelled"]) {
+    const app = await createTestApp({ event: makeEvent(status) })
+    try {
+      const response = await app.inject({ method: "GET", url: "/public/venues/klub-x/stream" })
+
+      assert.equal(response.statusCode, 409)
+      assert.equal(response.json().error.code, "CONFLICT")
+      assert.equal(response.json().error.message, "Queue is not active for this event")
+      assert.equal(app.eventBus.subscriberCount(app.eventBus.eventChannel(EVENT_ID)), 0)
+    } finally {
+      await app.close()
+    }
+  }
+
+  const app = await createTestApp({
+    event: {
+      ...makeEvent("active"),
+      publicQueueEnabled: false
+    }
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: "/public/venues/klub-x/stream" })
+
+    assert.equal(response.statusCode, 403)
+    assert.equal(response.json().error.code, "FORBIDDEN")
+    assert.equal(response.json().error.message, "Public queue is disabled for this event")
+    assert.equal(app.eventBus.subscriberCount(app.eventBus.eventChannel(EVENT_ID)), 0)
+  } finally {
+    await app.close()
+  }
+})
+
 test("dashboard stream without auth returns unauthorized", async () => {
   const app = await createTestApp({ authenticated: false })
   try {

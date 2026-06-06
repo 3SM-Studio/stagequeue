@@ -520,6 +520,17 @@ test("public active-event hides invisible or missing venue", async () => {
   }
 })
 
+test("public active-event hides active events operated by non-public organizations", async () => {
+  for (const organizationStatus of ["pending", "archived"]) {
+    const db = fakeDbForPublicActiveEventLookup({ organizationStatus })
+    const events = createEventsService(db.db)
+
+    const lookup = await events.getPublicActiveEventByVenueSlug("klub-x")
+
+    assert.equal(lookup, null)
+  }
+})
+
 async function createTestApp(options: {
   user?: AuthenticatedDomainUser
   permissions?: PermissionService
@@ -900,6 +911,45 @@ function fakeDbForPatchEvent(initial: EventSummary): DbResources & { updated: bo
   }
 
   return resources
+}
+
+function fakeDbForPublicActiveEventLookup(options: { organizationStatus: string }): DbResources {
+  let selectCount = 0
+  return {
+    db: {
+      select: () => {
+        selectCount += 1
+        if (selectCount === 1) {
+          return queryChain([
+            {
+              id: VENUE_ID,
+              slug: "klub-x",
+              name: "Klub X",
+              city: "Warszawa",
+              timezone: "Europe/Warsaw",
+              status: "active",
+              verificationStatus: "verified"
+            }
+          ])
+        }
+        if (selectCount === 2) {
+          return queryChain([
+            {
+              event: makeEvent(EVENT_ID, "friday", "active"),
+              organization: {
+                status: options.organizationStatus
+              }
+            }
+          ])
+        }
+
+        return queryChain([])
+      }
+    } as unknown as DbResources["db"],
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"]
+  }
 }
 
 function queryChain<T>(result: T[]) {

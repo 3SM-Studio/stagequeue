@@ -3,7 +3,7 @@ import { ApiHttpError } from "../../errors.ts"
 import { requireActiveCurrentUser } from "../../permissions/request.ts"
 import { startEventStream } from "../streams/eventStreams.ts"
 import { PARTICIPANT_COOKIE_NAME, hashParticipantToken, isValidParticipantToken, resolveParticipantToken } from "./participant.ts"
-import { assertPublicQueueVisible, type QueueSongRequest, type SubmitPublicRequestInput } from "./service.ts"
+import { type QueueSongRequest, type SubmitPublicRequestInput } from "./service.ts"
 import {
   readBody,
   readOptionalString,
@@ -17,7 +17,7 @@ export async function registerQueuePublicRoutes(app: FastifyInstance): Promise<v
   app.get("/public/venues/:venueSlug/stream", async (request, reply) => {
     const venueSlug = readParamSlug(request.params, "venueSlug")
     const activeEvent = await requireVenueActiveEvent(app, venueSlug)
-    assertPublicQueueVisible(activeEvent)
+    await app.queue.getPublicQueue(activeEvent.id)
 
     return startEventStream(app, reply, {
       channel: app.eventBus.eventChannel(activeEvent.id),
