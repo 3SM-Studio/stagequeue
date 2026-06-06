@@ -18,6 +18,7 @@ General rules remain in `docs/standards/`. This folder answers: "How do those st
 - `10-production-deployment-checklist.md`
 - `11-poza-nuta-release-checklist.md`
 - `12-live-karaoke-manual-qa-playbook.md`
+- `13-qa-evidence-release-signoff-template.md`
 
 ## Rule
 
