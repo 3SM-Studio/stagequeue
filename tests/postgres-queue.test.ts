@@ -17,7 +17,10 @@ import {
 } from "../apps/api/src/modules/queue/service.ts"
 import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
-import type { PermissionService } from "../apps/api/src/permissions/service.ts"
+import type {
+  PermissionService,
+  PlatformOwnerEventSupportAccessAuditInput
+} from "../apps/api/src/permissions/service.ts"
 
 const USER_ID = "11111111-1111-4111-8111-111111111111"
 const VENUE_ID = "22222222-2222-4222-8222-222222222222"
@@ -717,12 +720,16 @@ test("operator queue shows pending approved and now buckets", async () => {
 test("platform owner support access can view operator queue", async () => {
   const queue = createInMemoryQueueService()
   queue.addRequest(ACTIVE_EVENT_ID, "pending")
-  const app = await createTestApp({ queue, permissions: fakePermissions({ platformOwner: true }) })
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const app = await createTestApp({ queue, permissions: fakePermissions({ platformOwner: true, supportAccessAudit }) })
   try {
     const response = await app.inject({ method: "GET", url: `/dashboard/events/${ACTIVE_EVENT_ID}/operator-queue` })
 
     assert.equal(response.statusCode, 200)
     assert.equal(response.json().pending.length, 1)
+    assert.deepEqual(supportAccessAudit.map((entry) => entry.operation), ["dashboard.queue.view"])
+    assert.equal(supportAccessAudit[0].eventId, ACTIVE_EVENT_ID)
+    assert.equal(supportAccessAudit[0].userId, USER_ID)
   } finally {
     await app.close()
   }
@@ -750,7 +757,8 @@ test("approve pending request appends position and writes queue event", async ()
 test("platform owner support access can approve pending request", async () => {
   const queue = createInMemoryQueueService()
   const request = queue.addRequest(ACTIVE_EVENT_ID, "pending")
-  const app = await createTestApp({ queue, permissions: fakePermissions({ platformOwner: true }) })
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const app = await createTestApp({ queue, permissions: fakePermissions({ platformOwner: true, supportAccessAudit }) })
   try {
     const response = await app.inject({
       method: "POST",
@@ -760,6 +768,9 @@ test("platform owner support access can approve pending request", async () => {
     assert.equal(response.statusCode, 200)
     assert.equal(response.json().request.status, "approved")
     assert.equal(response.json().request.position, 1)
+    assert.deepEqual(supportAccessAudit.map((entry) => entry.operation), ["dashboard.queue.operate"])
+    assert.equal(supportAccessAudit[0].eventId, ACTIVE_EVENT_ID)
+    assert.equal(supportAccessAudit[0].userId, USER_ID)
   } finally {
     await app.close()
   }
@@ -789,7 +800,8 @@ test("approve successive pending requests assigns positions 1, 2 and 3", async (
 test("platform owner support access can start and finish a request", async () => {
   const queue = createInMemoryQueueService()
   const request = queue.addRequest(ACTIVE_EVENT_ID, "approved", { position: 1 })
-  const app = await createTestApp({ queue, permissions: fakePermissions({ platformOwner: true }) })
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const app = await createTestApp({ queue, permissions: fakePermissions({ platformOwner: true, supportAccessAudit }) })
   try {
     const start = await app.inject({
       method: "POST",
@@ -804,6 +816,10 @@ test("platform owner support access can start and finish a request", async () =>
     assert.equal(start.json().request.status, "now")
     assert.equal(done.statusCode, 200)
     assert.equal(done.json().request.status, "done")
+    assert.deepEqual(
+      supportAccessAudit.map((entry) => entry.operation),
+      ["dashboard.queue.operate", "dashboard.queue.operate"]
+    )
   } finally {
     await app.close()
   }
@@ -812,12 +828,17 @@ test("platform owner support access can start and finish a request", async () =>
 test("event staff queue operator still has operator queue access", async () => {
   const queue = createInMemoryQueueService()
   queue.addRequest(ACTIVE_EVENT_ID, "pending")
-  const app = await createTestApp({ queue, permissions: fakePermissions({ event: new Set(["event.operate_queue"]) }) })
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const app = await createTestApp({
+    queue,
+    permissions: fakePermissions({ event: new Set(["event.operate_queue"]), supportAccessAudit })
+  })
   try {
     const response = await app.inject({ method: "GET", url: `/dashboard/events/${ACTIVE_EVENT_ID}/operator-queue` })
 
     assert.equal(response.statusCode, 200)
     assert.equal(response.json().pending.length, 1)
+    assert.deepEqual(supportAccessAudit, [])
   } finally {
     await app.close()
   }
@@ -1132,12 +1153,14 @@ test("queue service advisory lock executes inside queue mutation transactions", 
 
 test("operator without permission gets forbidden", async () => {
   const queue = createInMemoryQueueService()
-  const app = await createTestApp({ queue, permissions: fakePermissions() })
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const app = await createTestApp({ queue, permissions: fakePermissions({ supportAccessAudit }) })
   try {
     const response = await app.inject({ method: "GET", url: `/dashboard/events/${ACTIVE_EVENT_ID}/operator-queue` })
 
     assert.equal(response.statusCode, 403)
     assert.equal(response.json().error.code, "FORBIDDEN")
+    assert.deepEqual(supportAccessAudit, [])
   } finally {
     await app.close()
   }
@@ -1464,7 +1487,11 @@ function readParticipantCookie(response: { headers: Record<string, string | numb
   return value
 }
 
-function fakePermissions(options: { event?: Set<string>; platformOwner?: boolean } = {}): PermissionService {
+function fakePermissions(options: {
+  event?: Set<string>
+  platformOwner?: boolean
+  supportAccessAudit?: PlatformOwnerEventSupportAccessAuditInput[]
+} = {}): PermissionService {
   const hasPlatformSupportAccess = options.platformOwner === true
   return {
     hasPlatformPermission: async () => false,
@@ -1475,7 +1502,12 @@ function fakePermissions(options: { event?: Set<string>; platformOwner?: boolean
     requireVenuePermission: async () => requireAllowed(false),
     hasEventPermission: async (_userId, _eventId, permission) => Boolean(options.event?.has(permission)),
     requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission)),
-    hasPlatformOwnerEventSupportAccess: async () => hasPlatformSupportAccess,
+    hasPlatformOwnerEventSupportAccess: async (userId, eventId, permission, operation) => {
+      if (hasPlatformSupportAccess) {
+        options.supportAccessAudit?.push({ eventId, operation, permission, userId })
+      }
+      return hasPlatformSupportAccess
+    },
     requirePlatformOwnerEventSupportAccess: async () => requireAllowed(hasPlatformSupportAccess)
   }
 }

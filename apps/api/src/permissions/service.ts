@@ -3,6 +3,7 @@ import {
   events,
   organizationMemberships,
   platformMemberships,
+  platformSupportAuditEvents,
   venueOrganizationAccess,
   type DbClient
 } from "@poza-nuta/db"
@@ -60,6 +61,7 @@ export type PlatformOwnerEventSupportOperation =
 
 export type PlatformOwnerEventSupportAccessAuditInput = {
   eventId: string
+  metadata?: Record<string, unknown>
   operation: PlatformOwnerEventSupportOperation
   permission: VenueEventPermission
   userId: string
@@ -154,6 +156,9 @@ export function createPermissionService(repository: PermissionRepository): Permi
 
     await repository.recordPlatformOwnerEventSupportAccess({
       eventId,
+      metadata: {
+        eventStatus: context.event.status
+      },
       operation,
       permission,
       userId
@@ -277,8 +282,16 @@ export function createDrizzlePermissionRepository(db: DbClient): PermissionRepos
       }
     },
 
-    async recordPlatformOwnerEventSupportAccess() {
-      // Central hook for C3 support-access audit. The DB audit sink is intentionally deferred until an audit-log table exists.
+    async recordPlatformOwnerEventSupportAccess(input) {
+      await db.insert(platformSupportAuditEvents).values({
+        actorUserId: input.userId,
+        targetEventId: input.eventId,
+        operation: input.operation,
+        permission: input.permission,
+        accessType: "platform_owner_support",
+        outcome: "allowed",
+        metadata: input.metadata ?? null
+      })
     }
   }
 }

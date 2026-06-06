@@ -61,7 +61,7 @@ Use the explicit platform-owner event support override policy for these MVP oper
 - `dashboard.queue.operate`
 - `dashboard.queue.stream`
 
-Mutating support operations remain allowed for MVP so the first platform owner can support/demo operator workflows, but they must pass through the central support override and audit hook. Future production hardening may split this into narrower audited support roles or impersonation.
+Mutating support operations remain allowed for MVP so the first platform owner can support/demo operator workflows, but they must pass through the central support override and persistent audit log. The audit entry is written to `platform_support_audit_events` with actor user, target event, operation, permission, access type `platform_owner_support`, outcome and creation time. Future production hardening may split this into narrower support roles, impersonation, and a dashboard audit viewer.
 
 ## Policy functions
 

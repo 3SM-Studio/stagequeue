@@ -88,13 +88,16 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
   app.get("/dashboard/events/:eventId", async (request) => {
     const user = await requireCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
-    const canSupport = await app.permissions.hasPlatformOwnerEventSupportAccess(
-      user.id,
-      eventId,
-      "event.view_stats",
-      "dashboard.event.read"
-    )
-    if (!canSupport && !(await app.permissions.hasEventPermission(user.id, eventId, "event.view_stats"))) {
+    const canView = await app.permissions.hasEventPermission(user.id, eventId, "event.view_stats")
+    const canSupport =
+      !canView &&
+      (await app.permissions.hasPlatformOwnerEventSupportAccess(
+        user.id,
+        eventId,
+        "event.view_stats",
+        "dashboard.event.read"
+      ))
+    if (!canView && !canSupport) {
       throw forbidden()
     }
 
@@ -156,13 +159,16 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
   app.get("/dashboard/events/:eventId/staff", async (request) => {
     const user = await requireCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
-    const canSupport = await app.permissions.hasPlatformOwnerEventSupportAccess(
-      user.id,
-      eventId,
-      "event.view_stats",
-      "dashboard.event.read"
-    )
-    if (!canSupport && !(await app.permissions.hasEventPermission(user.id, eventId, "event.view_stats"))) {
+    const canView = await app.permissions.hasEventPermission(user.id, eventId, "event.view_stats")
+    const canSupport =
+      !canView &&
+      (await app.permissions.hasPlatformOwnerEventSupportAccess(
+        user.id,
+        eventId,
+        "event.view_stats",
+        "dashboard.event.read"
+      ))
+    if (!canView && !canSupport) {
       throw forbidden()
     }
 

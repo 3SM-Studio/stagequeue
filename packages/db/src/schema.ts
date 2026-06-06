@@ -261,6 +261,30 @@ export const events = pgTable(
   ]
 )
 
+export const platformSupportAuditEvents = pgTable(
+  "platform_support_audit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actorUserId: uuid("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    targetEventId: uuid("target_event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "restrict" }),
+    operation: text("operation").notNull(),
+    permission: text("permission").notNull(),
+    accessType: text("access_type").notNull().default("platform_owner_support"),
+    outcome: text("outcome").notNull().default("allowed"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    index("platform_support_audit_events_actor_created_at_idx").on(table.actorUserId, table.createdAt),
+    index("platform_support_audit_events_event_created_at_idx").on(table.targetEventId, table.createdAt),
+    index("platform_support_audit_events_access_type_idx").on(table.accessType)
+  ]
+)
+
 export const eventStaffAssignments = pgTable(
   "event_staff_assignments",
   {

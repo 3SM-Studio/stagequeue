@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 import {
   hasOrganizationRolePermission,
@@ -15,8 +16,10 @@ import {
   defaultOrganizationMemberRole,
   defaultVenueAccessRole
 } from "../packages/db/src/schema.ts"
+import type { DbClient } from "../packages/db/src/index.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
 import {
+  createDrizzlePermissionRepository,
   createPermissionService,
   type EventPermissionContext,
   type PermissionRepository,
@@ -193,6 +196,96 @@ test("platform owner event access uses explicit support override", async () => {
     supportAccessAudit.map((entry) => entry.operation),
     ["dashboard.event.read", "dashboard.queue.operate", "dashboard.event.manage"]
   )
+  assertSupportAuditEntry(supportAccessAudit[0], {
+    eventId: "event-1",
+    metadata: { eventStatus: "active" },
+    operation: "dashboard.event.read",
+    permission: "event.view_stats",
+    userId: "platform-owner"
+  })
+})
+
+test("platform owner support access denial does not write an allowed audit event", async () => {
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const service = createPermissionService(
+    fakeRepository({
+      supportAccessAudit,
+      platformMemberships: {
+        "ordinary-user": [{ role: "platform_admin", status: "active" }]
+      },
+      eventContexts: {
+        "ordinary-user:event-1": {
+          event: {
+            id: "event-1",
+            venueId: "venue-1",
+            operatedByOrganizationId: "org-1",
+            status: "active"
+          },
+          organizationMembership: null,
+          venueAccess: [],
+          eventStaffAssignments: []
+        }
+      }
+    })
+  )
+
+  assert.equal(
+    await service.hasPlatformOwnerEventSupportAccess(
+      "ordinary-user",
+      "event-1",
+      "event.view_stats",
+      "dashboard.event.read"
+    ),
+    false
+  )
+  assert.deepEqual(supportAccessAudit, [])
+})
+
+test("platform support audit table is present in schema and migration", () => {
+  const schema = readFileSync("packages/db/src/schema.ts", "utf8")
+  const migration = readFileSync("packages/db/drizzle/0006_common_lorna_dane.sql", "utf8")
+
+  assert.ok(schema.includes("platformSupportAuditEvents"))
+  assert.ok(schema.includes("platform_owner_support"))
+  assert.ok(migration.includes('CREATE TABLE "platform_support_audit_events"'))
+  assert.ok(migration.includes('"actor_user_id" uuid NOT NULL'))
+  assert.ok(migration.includes('"target_event_id" uuid NOT NULL'))
+  assert.ok(migration.includes('"operation" text NOT NULL'))
+  assert.ok(migration.includes('"permission" text NOT NULL'))
+  assert.ok(migration.includes('"access_type" text DEFAULT \'platform_owner_support\' NOT NULL'))
+  assert.ok(migration.includes('"outcome" text DEFAULT \'allowed\' NOT NULL'))
+  assert.ok(migration.includes('"created_at" timestamp with time zone DEFAULT now() NOT NULL'))
+})
+
+test("drizzle permission repository persists platform owner support audit event", async () => {
+  const inserts: unknown[] = []
+  const repository = createDrizzlePermissionRepository({
+    insert: () => ({
+      values: (value: unknown) => {
+        inserts.push(value)
+      }
+    })
+  } as unknown as DbClient)
+
+  await repository.recordPlatformOwnerEventSupportAccess({
+    eventId: "event-1",
+    metadata: { eventStatus: "active" },
+    operation: "dashboard.queue.operate",
+    permission: "event.operate_queue",
+    userId: "user-1"
+  })
+
+  assert.deepEqual(inserts, [
+    {
+      actorUserId: "user-1",
+      targetEventId: "event-1",
+      operation: "dashboard.queue.operate",
+      permission: "event.operate_queue",
+      accessType: "platform_owner_support",
+      outcome: "allowed",
+      metadata: { eventStatus: "active" }
+    }
+  ])
 })
 
 test("platform owner event permission still requires an existing event", async () => {
@@ -249,6 +342,13 @@ type FakeRepositoryInput = {
   venueAccessByUser?: Record<string, VenueAccessRecord[]>
   eventContexts?: Record<string, EventPermissionContext>
   supportAccessAudit?: PlatformOwnerEventSupportAccessAuditInput[]
+}
+
+function assertSupportAuditEntry(
+  actual: PlatformOwnerEventSupportAccessAuditInput | undefined,
+  expected: PlatformOwnerEventSupportAccessAuditInput
+): void {
+  assert.deepEqual(actual, expected)
 }
 
 function fakeRepository(input: FakeRepositoryInput = {}): PermissionRepository {
