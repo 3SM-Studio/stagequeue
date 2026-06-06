@@ -4,6 +4,11 @@
   "private": true,
   "packageManager": "pnpm@10.17.1",
   "type": "module",
+  "pnpm": {
+    "overrides": {
+      "@esbuild-kit/core-utils@3.3.2>esbuild": "0.25.12"
+    }
+  },
   "scripts": {
     "build": "pnpm build:public && pnpm build:dashboard",
     "build:dashboard": "pnpm --filter @poza-nuta/dashboard-web build",
