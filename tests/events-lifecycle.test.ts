@@ -7,7 +7,10 @@ import { ApiHttpError } from "../apps/api/src/errors.ts"
 import { createEventsService, mapEventLifecycleError } from "../apps/api/src/modules/events/service.ts"
 import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
-import type { PermissionService } from "../apps/api/src/permissions/service.ts"
+import type {
+  PermissionService,
+  PlatformOwnerEventSupportAccessAuditInput
+} from "../apps/api/src/permissions/service.ts"
 import type {
   DashboardEventSummary,
   EventStaffAssignmentSummary,
@@ -331,12 +334,33 @@ test("pause, resume and close follow allowed lifecycle transitions", async () =>
 test("platform owner lifecycle support access uses explicit support override", async () => {
   const events = createInMemoryEventsService()
   const event = events.addSeedEvent("friday", "scheduled")
-  const app = await createTestApp({ events, permissions: fakePermissions({ platformOwner: true }) })
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const app = await createTestApp({ events, permissions: fakePermissions({ platformOwner: true, supportAccessAudit }) })
   try {
     const response = await app.inject({ method: "POST", url: `/dashboard/events/${event.id}/start` })
 
     assert.equal(response.statusCode, 200)
     assert.equal(response.json().event.status, "active")
+    assert.deepEqual(supportAccessAudit.map((entry) => entry.operation), ["dashboard.event.manage"])
+    assert.equal(supportAccessAudit[0].userId, USER_ID)
+    assert.equal(supportAccessAudit[0].eventId, event.id)
+  } finally {
+    await app.close()
+  }
+})
+
+test("platform owner event read support access records audit operation", async () => {
+  const events = createInMemoryEventsService()
+  const event = events.addSeedEvent("friday", "active")
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const app = await createTestApp({ events, permissions: fakePermissions({ platformOwner: true, supportAccessAudit }) })
+  try {
+    const response = await app.inject({ method: "GET", url: `/dashboard/events/${event.id}` })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(supportAccessAudit.map((entry) => entry.operation), ["dashboard.event.read"])
+    assert.equal(supportAccessAudit[0].userId, USER_ID)
+    assert.equal(supportAccessAudit[0].eventId, event.id)
   } finally {
     await app.close()
   }
@@ -751,6 +775,7 @@ function fakePermissions(options: {
   venue?: Set<string>
   event?: Set<string>
   platformOwner?: boolean
+  supportAccessAudit?: PlatformOwnerEventSupportAccessAuditInput[]
 } = {}): PermissionService {
   const hasPlatformSupportAccess = options.platformOwner === true
   return {
@@ -762,7 +787,12 @@ function fakePermissions(options: {
     requireVenuePermission: async (_userId, _venueId, permission) => requireAllowed(options.venue?.has(permission)),
     hasEventPermission: async (_userId, _eventId, permission) => Boolean(options.event?.has(permission)),
     requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission)),
-    hasPlatformOwnerEventSupportAccess: async () => hasPlatformSupportAccess,
+    hasPlatformOwnerEventSupportAccess: async (userId, eventId, permission, operation) => {
+      if (hasPlatformSupportAccess) {
+        options.supportAccessAudit?.push({ eventId, operation, permission, userId })
+      }
+      return hasPlatformSupportAccess
+    },
     requirePlatformOwnerEventSupportAccess: async () => requireAllowed(hasPlatformSupportAccess)
   }
 }

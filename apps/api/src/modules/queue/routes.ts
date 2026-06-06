@@ -157,7 +157,7 @@ export async function registerQueueDashboardRoutes(app: FastifyInstance): Promis
   app.get("/dashboard/events/:eventId/operator-queue", async (request) => {
     const user = await requireActiveCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
-    await requireQueueOperatorPermission(app, user.id, eventId)
+    await requireQueueViewPermission(app, user.id, eventId)
 
     return app.queue.getOperatorQueue(eventId)
   })
@@ -202,6 +202,20 @@ async function readOperatorActionContext(app: FastifyInstance, request: FastifyR
   await requireQueueOperatorPermission(app, user.id, eventId)
 
   return { userId: user.id, eventId, requestId }
+}
+
+async function requireQueueViewPermission(app: FastifyInstance, userId: string, eventId: string): Promise<void> {
+  const canOperate = await app.permissions.hasEventPermission(userId, eventId, "event.operate_queue")
+  const canManage = await app.permissions.hasEventPermission(userId, eventId, "event.manage")
+  const canSupport = await app.permissions.hasPlatformOwnerEventSupportAccess(
+    userId,
+    eventId,
+    "event.operate_queue",
+    "dashboard.queue.view"
+  )
+  if (!canOperate && !canManage && !canSupport) {
+    throw new ApiHttpError(403, "FORBIDDEN", "Forbidden")
+  }
 }
 
 async function requireQueueOperatorPermission(app: FastifyInstance, userId: string, eventId: string): Promise<void> {

@@ -8,7 +8,10 @@ import { createQueueService, type QueueSongRequest } from "../apps/api/src/modul
 import { createInMemoryDomainEventBus, type DomainEventPayload } from "../apps/api/src/plugins/eventBus.ts"
 import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
-import type { PermissionService } from "../apps/api/src/permissions/service.ts"
+import type {
+  PermissionService,
+  PlatformOwnerEventSupportAccessAuditInput
+} from "../apps/api/src/permissions/service.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
 import type { DbClient } from "@poza-nuta/db"
 
@@ -210,7 +213,8 @@ test("dashboard stream without event permission returns forbidden", async () => 
 })
 
 test("dashboard stream allows platform owner support access", async () => {
-  const app = await createTestApp({ permissions: fakePermissions({ platformOwner: true }) })
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const app = await createTestApp({ permissions: fakePermissions({ platformOwner: true, supportAccessAudit }) })
   await app.listen({ host: "127.0.0.1", port: 0 })
   const port = (app.server.address() as AddressInfo).port
   const controller = new AbortController()
@@ -224,6 +228,9 @@ test("dashboard stream allows platform owner support access", async () => {
 
     assert.equal(response.status, 200)
     assertAllowedSseCors(response, "http://localhost:3001")
+    assert.deepEqual(supportAccessAudit.map((entry) => entry.operation), ["dashboard.queue.stream"])
+    assert.equal(supportAccessAudit[0].eventId, EVENT_ID)
+    assert.equal(supportAccessAudit[0].userId, USER_ID)
   } finally {
     controller.abort()
     await app.close()
@@ -459,7 +466,12 @@ function makeEvent(status: string): EventSummary {
   }
 }
 
-function fakePermissions(options: { event?: Set<string>; platform?: Set<string>; platformOwner?: boolean } = {}): PermissionService {
+function fakePermissions(options: {
+  event?: Set<string>
+  platform?: Set<string>
+  platformOwner?: boolean
+  supportAccessAudit?: PlatformOwnerEventSupportAccessAuditInput[]
+} = {}): PermissionService {
   const hasPlatformSupportAccess = options.platformOwner === true
   return {
     hasPlatformPermission: async (_userId, permission) => Boolean(options.platform?.has(permission)),
@@ -470,7 +482,12 @@ function fakePermissions(options: { event?: Set<string>; platform?: Set<string>;
     requireVenuePermission: async () => requireAllowed(false),
     hasEventPermission: async (_userId, _eventId, permission) => Boolean(options.event?.has(permission)),
     requireEventPermission: async (_userId, _eventId, permission) => requireAllowed(options.event?.has(permission)),
-    hasPlatformOwnerEventSupportAccess: async () => hasPlatformSupportAccess,
+    hasPlatformOwnerEventSupportAccess: async (userId, eventId, permission, operation) => {
+      if (hasPlatformSupportAccess) {
+        options.supportAccessAudit?.push({ eventId, operation, permission, userId })
+      }
+      return hasPlatformSupportAccess
+    },
     requirePlatformOwnerEventSupportAccess: async () => requireAllowed(hasPlatformSupportAccess)
   }
 }
