@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { parseApiConfig } from "../apps/api/src/config.ts"
+import { validateWebConfigEnv } from "../scripts/check-web-config.mjs"
 
 test("production config fails without required auth secret", () => {
   assert.throws(
@@ -80,6 +81,64 @@ test("valid production config is accepted", () => {
   assert.equal(config.platformSetupToken, validProductionEnv().PLATFORM_SETUP_TOKEN)
 })
 
+test("web config check passes in non-strict mode without deployment env", () => {
+  const result = validateWebConfigEnv({})
+
+  assert.equal(result.ok, true)
+  assert.equal(result.strict, false)
+  assert.match(result.warnings.join("\n"), /Production-like web config is not active/)
+})
+
+test("web config check accepts strict production-like URLs", () => {
+  const result = validateWebConfigEnv(validWebConfigEnv())
+
+  assert.equal(result.ok, true)
+  assert.equal(result.strict, true)
+})
+
+test("web config check requires browser API URL in strict mode", () => {
+  const env = validWebConfigEnv()
+  delete env.NEXT_PUBLIC_API_URL
+
+  const result = validateWebConfigEnv(env)
+
+  assert.equal(result.ok, false)
+  assert.match(result.errors.join("\n"), /NEXT_PUBLIC_API_URL is required/)
+})
+
+test("web config check rejects localhost public URLs without printing values", () => {
+  const result = validateWebConfigEnv({
+    ...validWebConfigEnv(),
+    API_URL: "http://localhost:4321"
+  })
+
+  const errors = result.errors.join("\n")
+
+  assert.equal(result.ok, false)
+  assert.match(errors, /API_URL must use HTTPS/)
+  assert.match(errors, /API_URL must not point to localhost/)
+  assert.equal(errors.includes("http://localhost:4321"), false)
+})
+
+test("web config check allows internal API URL over private http", () => {
+  const result = validateWebConfigEnv({
+    ...validWebConfigEnv(),
+    API_INTERNAL_URL: "http://api:4321"
+  })
+
+  assert.equal(result.ok, true)
+})
+
+test("web config check warns when public and dashboard URLs are identical", () => {
+  const result = validateWebConfigEnv({
+    ...validWebConfigEnv(),
+    DASHBOARD_WEB_URL: "https://poza-nuta.example"
+  })
+
+  assert.equal(result.ok, true)
+  assert.match(result.warnings.join("\n"), /PUBLIC_WEB_URL and DASHBOARD_WEB_URL are identical/)
+})
+
 function validProductionEnv(): Record<string, string> {
   return {
     NODE_ENV: "production",
@@ -93,5 +152,16 @@ function validProductionEnv(): Record<string, string> {
     GOOGLE_CLIENT_SECRET: "google-client-secret-value",
     PLATFORM_SETUP_ENABLED: "true",
     PLATFORM_SETUP_TOKEN: "prod_platform_setup_token_32_min"
+  }
+}
+
+function validWebConfigEnv(): Record<string, string> {
+  return {
+    WEB_CONFIG_STRICT: "true",
+    API_URL: "https://api.poza-nuta.example",
+    PUBLIC_WEB_URL: "https://poza-nuta.example",
+    DASHBOARD_WEB_URL: "https://dashboard.poza-nuta.example",
+    NEXT_PUBLIC_API_URL: "https://api.poza-nuta.example",
+    NEXT_PUBLIC_DASHBOARD_URL: "https://dashboard.poza-nuta.example"
   }
 }

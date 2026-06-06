@@ -43,6 +43,7 @@ Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zast
 - [ ] `PUBLIC_WEB_URL` używa HTTPS i wskazuje publiczną aplikację uczestnika.
 - [ ] `DASHBOARD_WEB_URL` używa HTTPS i wskazuje dashboard.
 - [ ] `API_INTERNAL_URL`, jeśli używany, jest osiągalny tylko po stronie server-side i nie jest wymagany w przeglądarce.
+- [ ] `pnpm check:web-config` przechodzi z produkcyjnymi albo stagingowymi URL-ami ustawionymi w env.
 - [ ] CORS allowlist zawiera produkcyjne `PUBLIC_WEB_URL` i `DASHBOARD_WEB_URL`.
 - [ ] CORS nie używa wildcard `*` razem z credentials.
 - [ ] Cookie sesyjne Better Auth działa z `credentials: include`.
@@ -71,6 +72,7 @@ Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zast
 - [ ] Secret scanning alerts są zamknięte.
 - [ ] Gitleaks jest zielony.
 - [ ] `pnpm check:clean-package` przechodzi lokalnie albo w CI.
+- [ ] `pnpm check:web-config` został uruchomiony przed deploymentem z realnymi envami staging/production. Nie jest wymagany w domyślnym CI, bo CI nie ma produkcyjnych URL-i.
 - [ ] Release nie zawiera `.env`, dumpów DB, `node_modules`, `.next`, `dist`, `coverage` ani logów.
 
 ## 7. Smoke Checks After Deployment
