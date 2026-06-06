@@ -510,6 +510,7 @@ function makeRequest(status: string): QueueSongRequest {
 function makeEvent(status: string): EventSummary {
   return {
     id: EVENT_ID,
+    publicId: "sseEvent1",
     venueId: VENUE_ID,
     operatedByOrganizationId: ORG_ID,
     createdByUserId: USER_ID,
