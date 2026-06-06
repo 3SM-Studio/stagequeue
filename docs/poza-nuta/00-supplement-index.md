@@ -14,6 +14,9 @@ General rules remain in `docs/standards/`. This folder answers: "How do those st
 - `06-security-and-privacy-baseline.md`
 - `07-implementation-roadmap.md`
 - `08-open-questions.md`
+- `09-v3-quality-gates.md`
+- `10-production-deployment-checklist.md`
+- `11-poza-nuta-release-checklist.md`
 
 ## Rule
 
