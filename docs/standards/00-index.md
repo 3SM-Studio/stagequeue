@@ -50,4 +50,4 @@ Use these with the standards:
 - `docs/checklists/realtime-change-checklist.md`
 - `docs/checklists/incident-response-checklist.md`
 - `.github/pull_request_template.md`
-- `.github/workflows/ci.example.yml`
+- `.github/workflows/ci.yml`
