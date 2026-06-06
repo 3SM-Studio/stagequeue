@@ -32,6 +32,7 @@
     "db:studio": "pnpm --filter @poza-nuta/db db:studio",
     "check:clean-package": "node scripts/check-clean-package.mjs",
     "check:migrations": "node scripts/check-migrations.mjs",
+    "check:web-config": "node scripts/check-web-config.mjs",
     "format": "biome format --write .",
     "import:ising": "node --experimental-strip-types src/importers/ising/cli.ts",
     "lint": "biome check .",
