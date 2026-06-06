@@ -26,6 +26,14 @@ be enabled if the team wants stricter merge freshness.
 - [ ] Slug uniqueness is protected by DB constraint, not only app code.
 - [ ] Permission checks use organization/venue/event scope, not only user role.
 
+## Database migration PRs MUST check
+
+- [ ] `pnpm check:migrations` passes.
+- [ ] Every SQL migration in `packages/db/drizzle/` has a matching Drizzle journal entry.
+- [ ] Every migration has a matching `packages/db/drizzle/meta/*_snapshot.json`.
+- [ ] Migration numbering is sequential and matches Drizzle journal `idx`.
+- [ ] Static migration integrity check does not replace applying migrations against staging/local DB before release.
+
 ## Realtime default
 
 - Public/operator queue live updates SHOULD use SSE before WebSocket.

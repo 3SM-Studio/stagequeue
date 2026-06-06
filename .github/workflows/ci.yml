@@ -45,6 +45,9 @@ jobs:
       - name: Check architecture
         run: pnpm check:architecture
 
+      - name: Check migrations
+        run: pnpm check:migrations
+
       - name: Typecheck
         run: pnpm typecheck
 
