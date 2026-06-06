@@ -5,7 +5,11 @@ import { createApiApp } from "../apps/api/src/app.ts"
 import type { AuthenticatedDomainUser } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
-import type { EventSummary, PublicActiveEventLookup } from "../apps/api/src/modules/events/service.ts"
+import {
+  createEventsService,
+  type EventSummary,
+  type PublicActiveEventLookup
+} from "../apps/api/src/modules/events/service.ts"
 import { PARTICIPANT_COOKIE_NAME, hashParticipantToken } from "../apps/api/src/modules/queue/participant.ts"
 import {
   createQueueService,
@@ -379,6 +383,101 @@ test("public submit is blocked when publicJoinEnabled is false", async () => {
 
     assert.equal(response.statusCode, 409)
     assert.equal(response.json().error.code, "CONFLICT")
+  } finally {
+    await app.close()
+  }
+})
+
+test("public event detail returns active public event", async () => {
+  const db = fakeDbForPublicEventDetail({ status: "active", publicJoinEnabled: true, publicQueueEnabled: true })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db)
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}` })
+    const body = response.json()
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(body.event.id, ACTIVE_EVENT_ID)
+    assert.equal(body.event.publicId, ACTIVE_EVENT_ID)
+    assert.equal(body.event.name, "Active Event")
+    assert.equal(body.event.status, "active")
+    assert.equal(body.event.publicJoinEnabled, true)
+    assert.equal(body.event.publicQueueEnabled, true)
+    assert.equal(body.venue.slug, "klub-x")
+    assert.equal(body.venue.name, "Klub X")
+    assert.equal(body.operatedByOrganization.slug, "poza-nuta-demo")
+    assert.equal(body.submissions.enabled, true)
+    assert.equal(body.publicQueue.visible, true)
+  } finally {
+    await app.close()
+  }
+})
+
+test("public event detail hides events from non-public venues and organizations", async () => {
+  for (const hiddenContext of [
+    { venueStatus: "draft" },
+    { venueStatus: "archived" },
+    { venueVerificationStatus: "pending" },
+    { venueVerificationStatus: "rejected" },
+    { organizationStatus: "pending" },
+    { organizationStatus: "archived" }
+  ]) {
+    const db = fakeDbForPublicEventDetail({
+      status: "active",
+      publicJoinEnabled: true,
+      publicQueueEnabled: true,
+      ...hiddenContext
+    })
+    const app = await createTestApp({
+      db,
+      events: createEventsService(db.db)
+    })
+    try {
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}` })
+
+      assert.equal(response.statusCode, 404)
+      assert.equal(response.json().error.code, "NOT_FOUND")
+      assert.equal(response.json().error.message, "Missing event")
+    } finally {
+      await app.close()
+    }
+  }
+})
+
+test("public event detail hides non-public event statuses", async () => {
+  for (const status of ["draft", "archived", "cancelled"]) {
+    const db = fakeDbForPublicEventDetail({ status, publicJoinEnabled: true, publicQueueEnabled: true })
+    const app = await createTestApp({
+      db,
+      events: createEventsService(db.db)
+    })
+    try {
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}` })
+
+      assert.equal(response.statusCode, 404)
+      assert.equal(response.json().error.code, "NOT_FOUND")
+      assert.equal(response.json().error.message, "Missing event")
+    } finally {
+      await app.close()
+    }
+  }
+})
+
+test("public event detail does not expose private queue fields", async () => {
+  const db = fakeDbForPublicEventDetail({ status: "active", publicJoinEnabled: true, publicQueueEnabled: true })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db)
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}` })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.body.includes("operator note"), false)
+    assert.equal(response.body.includes("participantTokenHash"), false)
+    assert.equal(response.body.includes("createdByUserId"), false)
   } finally {
     await app.close()
   }
@@ -1730,6 +1829,48 @@ function fakeDbForPublicQueueStatus(status: string): DbResources {
 
       return queryChain([])
     }
+  } as unknown as DbResources["db"])
+}
+
+function fakeDbForPublicEventDetail(event: {
+  status: string
+  publicJoinEnabled: boolean
+  publicQueueEnabled: boolean
+  venueStatus?: string
+  venueVerificationStatus?: string
+  organizationStatus?: string
+}): DbResources {
+  return fakeDbResourcesWithClient({
+    select: () =>
+      queryChain([
+        {
+          event: {
+            id: ACTIVE_EVENT_ID,
+            name: "Active Event",
+            slug: "active-event",
+            status: event.status,
+            startsAt: null,
+            endsAt: null,
+            publicJoinEnabled: event.publicJoinEnabled,
+            publicQueueEnabled: event.publicQueueEnabled
+          },
+          venue: {
+            id: VENUE_ID,
+            slug: "klub-x",
+            name: "Klub X",
+            city: "Warszawa",
+            timezone: "Europe/Warsaw",
+            status: event.venueStatus ?? "active",
+            verificationStatus: event.venueVerificationStatus ?? "verified"
+          },
+          organization: {
+            id: "77777777-7777-4777-8777-777777777777",
+            slug: "poza-nuta-demo",
+            name: "Poza Nuta Demo",
+            status: event.organizationStatus ?? "active"
+          }
+        }
+      ])
   } as unknown as DbResources["db"])
 }
 

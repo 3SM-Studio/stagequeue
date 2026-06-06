@@ -1,11 +1,24 @@
-import { PublicApiError, type ActiveEventLookup, type Venue } from "./apiClient.ts"
-import { getActiveEvent, getVenue } from "./serverApiClient.ts"
+import { PublicApiError, type ActiveEventLookup, type PublicEventDetail, type Venue } from "./apiClient.ts"
+import { getActiveEvent, getServerPublicEventDetail, getVenue } from "./serverApiClient.ts"
 
 export type VenuePageData =
   | {
       kind: "ready"
       venue: Venue
       active: ActiveEventLookup
+    }
+  | {
+      kind: "not-found"
+    }
+  | {
+      kind: "api-error"
+      message: string
+    }
+
+export type PublicEventPageData =
+  | {
+      kind: "ready"
+      detail: PublicEventDetail
     }
   | {
       kind: "not-found"
@@ -36,5 +49,23 @@ export async function getVenueMetadataData(venueSlug: string): Promise<Venue | n
     return await getVenue(venueSlug)
   } catch {
     return null
+  }
+}
+
+export async function getPublicEventPageData(eventPublicId: string): Promise<PublicEventPageData> {
+  try {
+    return {
+      kind: "ready",
+      detail: await getServerPublicEventDetail(eventPublicId)
+    }
+  } catch (error) {
+    if (error instanceof PublicApiError && error.status === 404) {
+      return { kind: "not-found" }
+    }
+
+    return {
+      kind: "api-error",
+      message: error instanceof Error ? error.message : "Public API is unavailable"
+    }
   }
 }

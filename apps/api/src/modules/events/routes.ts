@@ -229,6 +229,16 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
 }
 
 export async function registerEventPublicRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/public/events/:eventPublicId", async (request) => {
+    const eventPublicId = readParamUuid(request.params, "eventPublicId")
+    const detail = await app.events.getPublicEventById(eventPublicId)
+    if (!detail) {
+      throw new ApiHttpError(404, "NOT_FOUND", "Missing event")
+    }
+
+    return detail
+  })
+
   app.get("/public/venues/:venueSlug/active-event", async (request) => {
     const venueSlug = readParamSlug(request.params, "venueSlug")
     const lookup = await app.events.getPublicActiveEventByVenueSlug(venueSlug)

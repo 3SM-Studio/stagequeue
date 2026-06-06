@@ -4,11 +4,13 @@ import {
   PublicApiError,
   type ActiveEventLookup,
   type ApiErrorBody,
+  type PublicEventDetail,
   type PublicQueue,
   type Venue
 } from "./apiClient.ts"
 import {
   assertActiveEventResponse,
+  assertPublicEventDetailResponse,
   assertPublicQueueResponse,
   assertVenueResponse
 } from "./apiValidation.ts"
@@ -40,6 +42,10 @@ export async function getActiveEvent(venueSlug: string): Promise<ActiveEventLook
 
 export async function getServerPublicQueue(eventId: string): Promise<PublicQueue> {
   return assertPublicQueueResponse(await fetchServerJson(`/public/events/${encodeURIComponent(eventId)}/queue`))
+}
+
+export async function getServerPublicEventDetail(eventPublicId: string): Promise<PublicEventDetail> {
+  return assertPublicEventDetailResponse(await fetchServerJson(`/public/events/${encodeURIComponent(eventPublicId)}`))
 }
 
 export async function getServerPublicQueueByVenueSlug(venueSlug: string): Promise<PublicQueue> {

@@ -1,6 +1,7 @@
 import type {
   ActiveEventLookup,
   PublicEvent,
+  PublicEventDetail,
   PublicMyRequest,
   PublicMyRequestsResponse,
   PublicQueue,
@@ -29,6 +30,27 @@ export function assertActiveEventResponse(value: unknown): ActiveEventLookup {
   return {
     venue: value.venue,
     activeEvent: value.activeEvent
+  }
+}
+
+export function assertPublicEventDetailResponse(value: unknown): PublicEventDetail {
+  if (
+    !isRecord(value) ||
+    !isPublicEventDetailEvent(value.event) ||
+    !isActiveEventVenue(value.venue) ||
+    !isPublicEventOrganization(value.operatedByOrganization) ||
+    !isPublicQueueSubmissions(value.submissions) ||
+    !isPublicEventQueueState(value.publicQueue)
+  ) {
+    throw invalidResponse("public event detail")
+  }
+
+  return {
+    event: value.event,
+    venue: value.venue,
+    operatedByOrganization: value.operatedByOrganization,
+    submissions: value.submissions,
+    publicQueue: value.publicQueue
   }
 }
 
@@ -124,6 +146,29 @@ function isPublicEvent(value: unknown): value is PublicEvent {
     typeof value.publicJoinEnabled === "boolean" &&
     typeof value.publicQueueEnabled === "boolean"
   )
+}
+
+function isPublicEventDetailEvent(value: unknown): value is PublicEventDetail["event"] {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.publicId) &&
+    isString(value.name) &&
+    isString(value.slug) &&
+    isEventStatus(value.status) &&
+    isNullableString(value.startsAt) &&
+    isNullableString(value.endsAt) &&
+    typeof value.publicJoinEnabled === "boolean" &&
+    typeof value.publicQueueEnabled === "boolean"
+  )
+}
+
+function isPublicEventOrganization(value: unknown): value is PublicEventDetail["operatedByOrganization"] {
+  return isRecord(value) && isString(value.id) && isString(value.slug) && isString(value.name)
+}
+
+function isPublicEventQueueState(value: unknown): value is PublicEventDetail["publicQueue"] {
+  return isRecord(value) && typeof value.visible === "boolean" && (value.reason === undefined || isString(value.reason))
 }
 
 function isQueueItem(value: unknown): value is QueueItem {
