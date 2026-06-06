@@ -520,6 +520,122 @@ test("public event detail does not expose private queue fields", async () => {
   }
 })
 
+test("public event detail does not expose invite code", async () => {
+  const db = fakeDbForPublicEventDetail({ status: "active", publicJoinEnabled: true, publicQueueEnabled: true })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db)
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}` })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.body.includes("inviteCode"), false)
+    assert.equal(response.body.includes("invite"), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("public invite claim sets participant cookie and returns event redirect without internal id", async () => {
+  const db = fakeDbForPublicInviteClaim({ status: "active" })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db)
+  })
+  try {
+    const response = await app.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
+    const token = readParticipantCookie(response)
+
+    assert.equal(response.statusCode, 200)
+    assert.match(token, /^[A-Za-z0-9_-]{32,128}$/)
+    assert.deepEqual(response.json(), {
+      eventPublicId: ACTIVE_EVENT_PUBLIC_ID,
+      redirectTo: `/event/${ACTIVE_EVENT_PUBLIC_ID}`
+    })
+    assert.equal(response.body.includes(ACTIVE_EVENT_ID), false)
+    assert.equal(response.body.includes("inviteCode1"), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("public invite claim reuses existing participant cookie", async () => {
+  const db = fakeDbForPublicInviteClaim({ status: "active" })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db)
+  })
+  const token = "participant-token-reused-by-invite-123"
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/invites/inviteCode1/claim",
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` }
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(readParticipantCookie(response), token)
+  } finally {
+    await app.close()
+  }
+})
+
+test("public invite claim rejects revoked and expired invites with controlled not found", async () => {
+  for (const invite of [
+    { inviteStatus: "revoked" },
+    { expiresAt: new Date(Date.now() - 1_000) }
+  ]) {
+    const db = fakeDbForPublicInviteClaim({ status: "active", ...invite })
+    const app = await createTestApp({
+      db,
+      events: createEventsService(db.db)
+    })
+    try {
+      const response = await app.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
+
+      assert.equal(response.statusCode, 404)
+      assert.equal(response.json().error.code, "NOT_FOUND")
+      assert.equal(response.json().error.message, "Invalid or expired invite")
+      assert.equal(response.body.includes("inviteCode1"), false)
+    } finally {
+      await app.close()
+    }
+  }
+})
+
+test("public invite claim hides invites for non-public venues organizations and events", async () => {
+  for (const hiddenContext of [
+    { venueStatus: "draft" },
+    { venueStatus: "archived" },
+    { venueVerificationStatus: "pending" },
+    { venueVerificationStatus: "rejected" },
+    { organizationStatus: "pending" },
+    { organizationStatus: "archived" },
+    { status: "draft" },
+    { status: "archived" },
+    { status: "cancelled" }
+  ]) {
+    const db = fakeDbForPublicInviteClaim({
+      status: "active",
+      ...hiddenContext
+    })
+    const app = await createTestApp({
+      db,
+      events: createEventsService(db.db)
+    })
+    try {
+      const response = await app.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
+
+      assert.equal(response.statusCode, 404)
+      assert.equal(response.json().error.code, "NOT_FOUND")
+      assert.equal(response.json().error.message, "Invalid or expired invite")
+    } finally {
+      await app.close()
+    }
+  }
+})
+
 test("event public id unique constraint exists in schema and migration", () => {
   const schemaSource = readFileSync("packages/db/src/schema.ts", "utf8")
   const migrationSource = readFileSync("packages/db/drizzle/0007_melodic_moira_mactaggert.sql", "utf8")
@@ -528,6 +644,17 @@ test("event public id unique constraint exists in schema and migration", () => {
   assert.match(migrationSource, /ALTER TABLE "events" ADD COLUMN "public_id" text/)
   assert.match(migrationSource, /ALTER TABLE "events" ALTER COLUMN "public_id" SET NOT NULL/)
   assert.match(migrationSource, /events_public_id_unique/)
+})
+
+test("event invites table and code unique constraint exist in schema and migration", () => {
+  const schemaSource = readFileSync("packages/db/src/schema.ts", "utf8")
+  const migrationSource = readFileSync("packages/db/drizzle/0008_previous_human_robot.sql", "utf8")
+
+  assert.match(schemaSource, /eventInvites/)
+  assert.match(schemaSource, /event_invites_code_unique/)
+  assert.match(migrationSource, /CREATE TABLE "event_invites"/)
+  assert.match(migrationSource, /CONSTRAINT "event_invites_code_unique" UNIQUE\("code"\)/)
+  assert.match(migrationSource, /INSERT INTO "event_invites"/)
 })
 
 test("event-id public submit hides events from non-public venues and organizations", async () => {
@@ -1923,6 +2050,40 @@ function fakeDbForPublicEventDetail(event: {
   } as unknown as DbResources["db"])
 }
 
+function fakeDbForPublicInviteClaim(event: {
+  status: string
+  inviteStatus?: string
+  expiresAt?: Date | null
+  venueStatus?: string
+  venueVerificationStatus?: string
+  organizationStatus?: string
+}): DbResources {
+  return fakeDbResourcesWithClient({
+    select: () =>
+      queryChain([
+        {
+          invite: {
+            status: event.inviteStatus ?? "active",
+            expiresAt: event.expiresAt ?? null
+          },
+          event: {
+            publicId: ACTIVE_EVENT_PUBLIC_ID,
+            status: event.status,
+            publicJoinEnabled: true,
+            publicQueueEnabled: true
+          },
+          venue: {
+            status: event.venueStatus ?? "active",
+            verificationStatus: event.venueVerificationStatus ?? "verified"
+          },
+          organization: {
+            status: event.organizationStatus ?? "active"
+          }
+        }
+      ])
+  } as unknown as DbResources["db"])
+}
+
 function fakeDbResourcesWithClient(db: DbResources["db"]): DbResources {
   return {
     db: Object.assign({ execute: async () => [] }, db) as unknown as DbResources["db"],
@@ -1938,6 +2099,9 @@ function queryChain<T>(result: T[]) {
       return this
     },
     innerJoin() {
+      return this
+    },
+    leftJoin() {
       return this
     },
     where() {

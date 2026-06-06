@@ -4,7 +4,13 @@ import { createApiApp } from "../apps/api/src/app.ts"
 import type { AuthenticatedDomainUser } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
-import { createEventsService, generateEventPublicId, mapEventCreateError, mapEventLifecycleError } from "../apps/api/src/modules/events/service.ts"
+import {
+  createEventsService,
+  generateEventInviteCode,
+  generateEventPublicId,
+  mapEventCreateError,
+  mapEventLifecycleError
+} from "../apps/api/src/modules/events/service.ts"
 import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
 import type {
@@ -66,6 +72,9 @@ test("platform owner can create an event without operatedByOrganizationId", asyn
 
     assert.equal(response.statusCode, 201)
     assert.equal(typeof body.event.publicId, "string")
+    assert.equal(typeof body.event.invite.code, "string")
+    assert.equal(body.event.invite.urlPath, `/invite/${body.event.invite.code}`)
+    assert.notEqual(body.event.invite.code, body.event.publicId)
     assert.equal(body.event.slug, "test-karaoke")
     assert.equal(body.event.status, "draft")
     assert.equal(body.event.publicJoinEnabled, false)
@@ -142,12 +151,30 @@ test("event public id generator returns short URL-safe identifiers", () => {
   assert.equal(publicId.includes("+"), false)
 })
 
+test("event invite code generator returns URL-safe identifiers independent from event public IDs", () => {
+  const inviteCode = generateEventInviteCode()
+  const publicId = generateEventPublicId()
+
+  assert.match(inviteCode, /^[A-Za-z0-9_-]{8,80}$/)
+  assert.equal(inviteCode.includes("/"), false)
+  assert.equal(inviteCode.includes("+"), false)
+  assert.notEqual(inviteCode, publicId)
+})
+
 test("create event maps exhausted public id collision to controlled conflict", () => {
   const error = mapEventCreateError({ code: "23505", constraint: "events_public_id_unique" })
 
   assert.ok(error instanceof ApiHttpError)
   assert.equal(error.statusCode, 409)
   assert.equal(error.code, "PUBLIC_EVENT_ID_CONFLICT")
+})
+
+test("create event maps exhausted invite code collision to controlled conflict", () => {
+  const error = mapEventCreateError({ code: "23505", constraint: "event_invites_code_unique" })
+
+  assert.ok(error instanceof ApiHttpError)
+  assert.equal(error.statusCode, 409)
+  assert.equal(error.code, "INVITE_CODE_CONFLICT")
 })
 
 test("user without create permission cannot create an event", async () => {
@@ -187,6 +214,7 @@ test("dashboard events list includes venue and operated organization context", a
       name: "Poza Nuta Demo",
       slug: "poza-nuta-demo"
     })
+    assert.equal(body.events[0].invite.urlPath, `/invite/${body.events[0].invite.code}`)
   } finally {
     await app.close()
   }
@@ -574,6 +602,7 @@ async function createTestApp(options: {
 
 type InMemoryEventsState = {
   events: Map<string, EventSummary>
+  invites: Map<string, string>
   staff: Map<string, EventStaffAssignmentSummary>
   queueEvents: Array<{ eventId: string; type: string }>
   organizationHasAccess: boolean
@@ -583,6 +612,7 @@ type InMemoryEventsState = {
 function createInMemoryEventsService(options: { organizationHasAccess?: boolean; activeMembers?: Set<string> } = {}) {
   const state: InMemoryEventsState = {
     events: new Map(),
+    invites: new Map(),
     staff: new Map(),
     queueEvents: [],
     organizationHasAccess: options.organizationHasAccess ?? true,
@@ -597,6 +627,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
     addSeedEvent(slug, status) {
       const event = makeEvent(`aaaaaaaa-aaaa-4aaa-8aaa-${String(state.events.size + 1).padStart(12, "0")}`, slug, status)
       state.events.set(event.id, event)
+      state.invites.set(event.id, `invite-${slug}`)
       return event
     },
     async listForUser() {
@@ -626,6 +657,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
         venueId: input.venueId
       }
       state.events.set(event.id, event)
+      state.invites.set(event.id, `invite-${input.slug}`)
       return event
     },
     async patchEvent(eventId, input) {
@@ -724,6 +756,16 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
             ? { visible: true }
             : { visible: false }
       }
+    },
+    async claimPublicInvite(inviteCode) {
+      const event = [...state.events.values()].find((candidate) => state.invites.get(candidate.id) === inviteCode)
+      if (!event || !["scheduled", "active", "paused", "closed"].includes(event.status)) {
+        throw new ApiHttpError(404, "NOT_FOUND", "Invalid or expired invite")
+      }
+      return {
+        eventPublicId: event.publicId,
+        redirectTo: `/event/${event.publicId}`
+      }
     }
   }
 
@@ -767,6 +809,10 @@ function toDashboardEvent(event: EventSummary): DashboardEventSummary {
       id: ORG_ID,
       name: "Poza Nuta Demo",
       slug: "poza-nuta-demo"
+    },
+    invite: {
+      code: `invite-${event.slug}`,
+      urlPath: `/invite/invite-${event.slug}`
     }
   }
 }
@@ -1005,6 +1051,9 @@ function queryChain<T>(result: T[]) {
       return this
     },
     innerJoin() {
+      return this
+    },
+    leftJoin() {
       return this
     },
     where() {

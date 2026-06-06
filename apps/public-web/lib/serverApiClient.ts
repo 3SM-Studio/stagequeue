@@ -5,11 +5,13 @@ import {
   type ActiveEventLookup,
   type ApiErrorBody,
   type PublicEventDetail,
+  type PublicInviteClaimResponse,
   type PublicQueue,
   type Venue
 } from "./apiClient.ts"
 import {
   assertActiveEventResponse,
+  assertPublicInviteClaimResponse,
   assertPublicEventDetailResponse,
   assertPublicQueueResponse,
   assertVenueResponse
@@ -48,6 +50,35 @@ export async function getServerPublicEventDetail(eventPublicId: string): Promise
   return assertPublicEventDetailResponse(await fetchServerJson(`/public/events/${encodeURIComponent(eventPublicId)}`))
 }
 
+export type ServerInviteClaimResult = {
+  body: PublicInviteClaimResponse
+  setCookieHeaders: string[]
+}
+
+export async function claimPublicInviteServer(
+  inviteCode: string,
+  cookieHeader?: string | null
+): Promise<ServerInviteClaimResult> {
+  const init: RequestInit = {
+    method: "POST",
+    cache: "no-store"
+  }
+  if (cookieHeader) {
+    init.headers = { cookie: cookieHeader }
+  }
+  const response = await fetch(buildServerPublicApiUrl(`/public/invites/${encodeURIComponent(inviteCode)}/claim`), init)
+
+  if (!response.ok) {
+    const body = await readApiErrorBody(response)
+    throw new PublicApiError(response.status, body.error?.code ?? "API_ERROR", body.error?.message ?? "API request failed")
+  }
+
+  return {
+    body: assertPublicInviteClaimResponse(await response.json()),
+    setCookieHeaders: readSetCookieHeaders(response.headers)
+  }
+}
+
 export async function getServerPublicQueueByVenueSlug(venueSlug: string): Promise<PublicQueue> {
   assertPublicVenueSlug(venueSlug)
   return assertPublicQueueResponse(await fetchServerJson(`/public/venues/${encodeURIComponent(venueSlug)}/queue`))
@@ -79,4 +110,14 @@ async function readApiErrorBody(response: Response): Promise<ApiErrorBody> {
   } catch {
     return {}
   }
+}
+
+function readSetCookieHeaders(headers: Headers): string[] {
+  const maybeHeaders = headers as Headers & { getSetCookie?: () => string[] }
+  if (typeof maybeHeaders.getSetCookie === "function") {
+    return maybeHeaders.getSetCookie()
+  }
+
+  const setCookie = headers.get("set-cookie")
+  return setCookie ? [setCookie] : []
 }

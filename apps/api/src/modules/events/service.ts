@@ -2,6 +2,7 @@ import {
   eventStaffAssignments,
   eventStaffRoles,
   eventStatuses,
+  eventInvites,
   events,
   organizations,
   organizationMemberships,
@@ -50,6 +51,10 @@ export type DashboardEventSummary = EventSummary & {
     name: string
     slug: string
   }
+  invite: {
+    code: string
+    urlPath: string
+  } | null
 }
 
 export type EventStaffAssignmentSummary = {
@@ -104,6 +109,11 @@ export type PublicEventDetail = {
     visible: boolean
     reason?: string
   }
+}
+
+export type PublicInviteClaim = {
+  eventPublicId: string
+  redirectTo: string
 }
 
 export type CreateEventInput = {
@@ -161,6 +171,7 @@ export type EventsService = {
   userIsActiveOrganizationMember(userId: string, organizationId: string): Promise<boolean>
   getPublicActiveEventByVenueSlug(venueSlug: string): Promise<PublicActiveEventLookup | null>
   getPublicEventById(eventPublicId: string): Promise<PublicEventDetail | null>
+  claimPublicInvite(inviteCode: string): Promise<PublicInviteClaim>
 }
 
 const lifecycleTransitions = {
@@ -173,11 +184,18 @@ const lifecycleTransitions = {
 } as const satisfies Record<LifecycleAction, { from: readonly string[]; to: EventStatus; queueEventType: string }>
 
 const EVENT_PUBLIC_ID_BYTES = 8
+const EVENT_INVITE_CODE_BYTES = 9
 const MAX_PUBLIC_ID_GENERATION_ATTEMPTS = 5
+const MAX_INVITE_CODE_GENERATION_ATTEMPTS = 5
 
 // Public event IDs are case-sensitive base64url strings. Keep them separate from internal UUIDs.
 export function generateEventPublicId(): string {
   return randomBytes(EVENT_PUBLIC_ID_BYTES).toString("base64url")
+}
+
+// Invite codes are case-sensitive base64url strings and can be rotated independently from event public IDs.
+export function generateEventInviteCode(): string {
+  return randomBytes(EVENT_INVITE_CODE_BYTES).toString("base64url")
 }
 
 export function createEventsService(db: DbClient, eventBus?: DomainEventBus): EventsService {
@@ -189,6 +207,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           .from(events)
           .innerJoin(venues, eq(events.venueId, venues.id))
           .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+          .leftJoin(eventInvites, and(eq(eventInvites.eventId, events.id), eq(eventInvites.status, "active")))
         return uniqueDashboardEvents(rows.map(mapDashboardEventRow))
       }
 
@@ -211,6 +230,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         )
         .innerJoin(venues, eq(events.venueId, venues.id))
         .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+        .leftJoin(eventInvites, and(eq(eventInvites.eventId, events.id), eq(eventInvites.status, "active")))
         .where(and(eq(organizationMemberships.userId, userId), eq(organizationMemberships.status, "active")))
 
       return uniqueDashboardEvents(rows.map(mapDashboardEventRow))
@@ -227,6 +247,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         .from(events)
         .innerJoin(venues, eq(events.venueId, venues.id))
         .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+        .leftJoin(eventInvites, and(eq(eventInvites.eventId, events.id), eq(eventInvites.status, "active")))
         .where(eq(events.id, eventId))
         .limit(1)
 
@@ -244,17 +265,23 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
       }
       validateEventDates(input.startsAt, input.endsAt)
 
-      const rows = await insertEventWithGeneratedPublicId(db, {
-        venueId: input.venueId,
-        operatedByOrganizationId,
-        createdByUserId: input.createdByUserId,
-        name: input.name,
-        slug: input.slug,
-        status: input.status,
-        startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
-        endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
-        publicJoinEnabled: input.publicJoinEnabled ?? false,
-        publicQueueEnabled: input.publicQueueEnabled ?? false
+      const rows = await inTransaction(db, async (tx) => {
+        const inserted = await insertEventWithGeneratedPublicId(tx, {
+          venueId: input.venueId,
+          operatedByOrganizationId,
+          createdByUserId: input.createdByUserId,
+          name: input.name,
+          slug: input.slug,
+          status: input.status,
+          startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
+          endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
+          publicJoinEnabled: input.publicJoinEnabled ?? false,
+          publicQueueEnabled: input.publicQueueEnabled ?? false
+        })
+        if (inserted[0]) {
+          await insertDefaultInviteWithGeneratedCode(tx, inserted[0].id)
+        }
+        return inserted
       })
 
       if (!rows[0]) {
@@ -553,6 +580,39 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         submissions: getPublicSubmissionsState(row.event),
         publicQueue: getPublicQueueState(row.event)
       }
+    },
+
+    async claimPublicInvite(inviteCode) {
+      const rows = await db
+        .select(publicInviteClaimSelection)
+        .from(eventInvites)
+        .innerJoin(events, eq(eventInvites.eventId, events.id))
+        .innerJoin(venues, eq(events.venueId, venues.id))
+        .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+        .where(eq(eventInvites.code, inviteCode))
+        .limit(1)
+      const row = rows[0]
+      if (!row || row.invite.status !== "active" || isExpired(row.invite.expiresAt)) {
+        throw invalidInvite()
+      }
+
+      try {
+        assertPublicEventContainerVisible({
+          venue: row.venue,
+          organization: row.organization
+        })
+        assertPublicEventDetailVisible(row.event)
+      } catch (error) {
+        if (error instanceof ApiHttpError && error.statusCode === 404) {
+          throw invalidInvite()
+        }
+        throw error
+      }
+
+      return {
+        eventPublicId: row.event.publicId,
+        redirectTo: `/event/${row.event.publicId}`
+      }
     }
   }
 }
@@ -638,6 +698,28 @@ async function insertEventWithGeneratedPublicId(
   throw mapEventCreateError(publicIdCollision)
 }
 
+async function insertDefaultInviteWithGeneratedCode(db: DbClient, eventId: string): Promise<void> {
+  let inviteCodeCollision: unknown
+  for (let attempt = 0; attempt < MAX_INVITE_CODE_GENERATION_ATTEMPTS; attempt += 1) {
+    try {
+      await db.insert(eventInvites).values({
+        eventId,
+        code: generateEventInviteCode(),
+        status: "active"
+      })
+      return
+    } catch (error) {
+      if (isPgUniqueViolation(error) && error.constraint === "event_invites_code_unique") {
+        inviteCodeCollision = error
+        continue
+      }
+      throw mapEventCreateError(error)
+    }
+  }
+
+  throw mapEventCreateError(inviteCodeCollision)
+}
+
 export function mapEventCreateError(error: unknown): unknown {
   if (isPgUniqueViolation(error)) {
     if (error.constraint === "events_venue_slug_unique") {
@@ -648,6 +730,9 @@ export function mapEventCreateError(error: unknown): unknown {
     }
     if (error.constraint === "events_public_id_unique") {
       return new ApiHttpError(409, "PUBLIC_EVENT_ID_CONFLICT", "Could not allocate a public event id")
+    }
+    if (error.constraint === "event_invites_code_unique") {
+      return new ApiHttpError(409, "INVITE_CODE_CONFLICT", "Could not allocate an invite code")
     }
   }
 
@@ -700,7 +785,8 @@ const dashboardEventSelection = {
   venueName: venues.name,
   venueSlug: venues.slug,
   organizationName: organizations.name,
-  organizationSlug: organizations.slug
+  organizationSlug: organizations.slug,
+  inviteCode: eventInvites.code
 }
 
 const publicEventDetailSelection = {
@@ -732,11 +818,32 @@ const publicEventDetailSelection = {
   }
 }
 
+const publicInviteClaimSelection = {
+  invite: {
+    status: eventInvites.status,
+    expiresAt: eventInvites.expiresAt
+  },
+  event: {
+    publicId: events.publicId,
+    status: events.status,
+    publicJoinEnabled: events.publicJoinEnabled,
+    publicQueueEnabled: events.publicQueueEnabled
+  },
+  venue: {
+    status: venues.status,
+    verificationStatus: venues.verificationStatus
+  },
+  organization: {
+    status: organizations.status
+  }
+}
+
 type DashboardEventRow = EventSummary & {
   venueName: string
   venueSlug: string
   organizationName: string
   organizationSlug: string
+  inviteCode: string | null
 }
 
 function mapDashboardEventRow(row: DashboardEventRow): DashboardEventSummary {
@@ -762,7 +869,8 @@ function mapDashboardEventRow(row: DashboardEventRow): DashboardEventSummary {
       id: row.operatedByOrganizationId,
       name: row.organizationName,
       slug: row.organizationSlug
-    }
+    },
+    invite: row.inviteCode ? { code: row.inviteCode, urlPath: `/invite/${row.inviteCode}` } : null
   }
 }
 
@@ -805,4 +913,12 @@ export function mapEventLifecycleError(error: unknown): unknown {
 
 function notFound(message: string): ApiHttpError {
   return new ApiHttpError(404, "NOT_FOUND", message)
+}
+
+function invalidInvite(): ApiHttpError {
+  return new ApiHttpError(404, "NOT_FOUND", "Invalid or expired invite")
+}
+
+function isExpired(expiresAt: Date | null): boolean {
+  return expiresAt !== null && expiresAt.getTime() <= Date.now()
 }

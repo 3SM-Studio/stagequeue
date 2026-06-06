@@ -4,6 +4,7 @@ import { and, eq, inArray, sql } from "drizzle-orm"
 import { createDbClient, type DbClient } from "./client.ts"
 import {
   events,
+  eventInvites,
   organizations,
   queueEvents,
   songRequests,
@@ -61,6 +62,12 @@ type DemoEventInput = {
   publicQueueEnabled: boolean
 }
 
+type DemoEventInviteInput = {
+  eventId: string
+  code: string
+  status: "active" | "revoked"
+}
+
 type DemoSongRequestInput = {
   venueId: string
   eventId: string
@@ -96,6 +103,7 @@ export type DemoSeedRepository = {
   findRunningEventForVenue(venueId: string): Promise<DemoEventRecord | null>
   insertEvent(input: DemoEventInput): Promise<DemoEventRecord>
   updateEvent(eventId: string, input: Partial<DemoEventInput> & { status?: string }): Promise<DemoEventRecord>
+  upsertEventInvite(input: DemoEventInviteInput): Promise<void>
   resetQueue(eventId: string): Promise<void>
   insertSongRequest(input: DemoSongRequestInput): Promise<EntityId>
   insertQueueEvent(input: DemoQueueEventInput): Promise<void>
@@ -131,6 +139,7 @@ export function buildDemoSeedData() {
     },
     event: {
       publicId: "demoKaraoke1",
+      inviteCode: "demoInvite1",
       slug: "demo-karaoke",
       name: "Demo Karaoke Night",
       status: "active",
@@ -216,20 +225,26 @@ export async function seedDemoWithRepository(
     await repository.updateEvent(runningEvent.id, { status: "closed" })
   }
 
+  const { inviteCode, ...eventData } = data.event
   const event =
     demoEvent === null
       ? await repository.insertEvent({
           venueId: venue.id,
           operatedByOrganizationId: organization.id,
-          ...data.event
+          ...eventData
         })
       : await repository.updateEvent(demoEvent.id, {
           venueId: venue.id,
           operatedByOrganizationId: organization.id,
-          ...data.event
+          ...eventData
         })
 
   await repository.resetQueue(event.id)
+  await repository.upsertEventInvite({
+    eventId: event.id,
+    code: inviteCode,
+    status: "active"
+  })
   await repository.insertQueueEvent({
     venueId: venue.id,
     eventId: event.id,
@@ -416,6 +431,18 @@ export function createDrizzleDemoSeedRepository(db: DbClient): DemoSeedRepositor
         .returning({ id: events.id, slug: events.slug, status: events.status })
 
       return requireRow(row, "event")
+    },
+    async upsertEventInvite(input) {
+      await db
+        .insert(eventInvites)
+        .values(input)
+        .onConflictDoUpdate({
+          target: eventInvites.code,
+          set: {
+            eventId: sql`excluded.event_id`,
+            status: sql`excluded.status`
+          }
+        })
     },
     async resetQueue(eventId) {
       await db.delete(queueEvents).where(eq(queueEvents.eventId, eventId))

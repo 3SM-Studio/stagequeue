@@ -27,6 +27,7 @@ export const venueVerificationStatuses = ["unclaimed", "pending", "verified", "r
 export const venueAccessRoles = ["owner", "manager", "event_creator", "karaoke_operator", "viewer"] as const
 export const venueAccessStatuses = ["pending", "active", "revoked", "expired", "rejected"] as const
 export const eventStatuses = ["draft", "scheduled", "active", "paused", "closed", "archived", "cancelled"] as const
+export const eventInviteStatuses = ["active", "revoked"] as const
 export const eventStaffRoles = ["lead_host", "host", "queue_operator", "viewer"] as const
 export const eventStaffStatuses = ["active", "removed"] as const
 export const songRequestStatuses = ["pending", "approved", "now", "done", "skipped", "rejected"] as const
@@ -260,6 +261,24 @@ export const events = pgTable(
       .on(table.venueId)
       .where(sql`${table.status} in ('active', 'paused')`),
     index("events_operated_by_organization_id_idx").on(table.operatedByOrganizationId)
+  ]
+)
+
+export const eventInvites = pgTable(
+  "event_invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    status: text("status").notNull().default("active"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    unique("event_invites_code_unique").on(table.code),
+    index("event_invites_event_id_idx").on(table.eventId)
   ]
 )
 
