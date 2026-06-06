@@ -1,6 +1,7 @@
 import {
   assertActiveEventResponse,
   assertMyRequestsResponse,
+  assertPublicInviteClaimResponse,
   assertPublicEventDetailResponse,
   assertPublicQueueResponse,
   assertSubmitRequestResponse,
@@ -145,6 +146,11 @@ export type PublicMyRequestsResponse = {
   requests: PublicMyRequest[]
 }
 
+export type PublicInviteClaimResponse = {
+  eventPublicId: string
+  redirectTo: string
+}
+
 export type ApiErrorBody = {
   error?: {
     code?: string
@@ -206,6 +212,14 @@ export async function getPublicQueue(eventId: string): Promise<PublicQueue> {
 
 export async function getPublicEventDetail(eventPublicId: string): Promise<PublicEventDetail> {
   return assertPublicEventDetailResponse(await fetchJson(`/public/events/${encodeURIComponent(eventPublicId)}`))
+}
+
+export async function claimPublicInvite(inviteCode: string): Promise<PublicInviteClaimResponse> {
+  return assertPublicInviteClaimResponse(
+    await fetchJson(`/public/invites/${encodeURIComponent(inviteCode)}/claim`, {
+      method: "POST"
+    })
+  )
 }
 
 export async function getPublicQueueByVenueSlug(venueSlug: string): Promise<PublicQueue> {

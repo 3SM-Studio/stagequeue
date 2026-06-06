@@ -16,6 +16,7 @@ test("demo seed data describes the public QA happy path", () => {
   assert.equal(data.venue.status, "active")
   assert.equal(data.venue.verificationStatus, "verified")
   assert.equal(data.event.slug, "demo-karaoke")
+  assert.equal(data.event.inviteCode, "demoInvite1")
   assert.equal(data.event.status, "active")
   assert.equal(data.event.publicJoinEnabled, true)
   assert.equal(data.event.publicQueueEnabled, true)
@@ -45,6 +46,7 @@ test("demo seed repository orchestration is idempotent", async () => {
   assert.equal(repository.state.venues.size, 1)
   assert.equal(repository.state.access.size, 1)
   assert.equal(repository.state.events.length, 1)
+  assert.equal(repository.state.invites.size, 1)
   assert.equal(repository.state.events[0]?.slug, "demo-karaoke")
   assert.equal(repository.state.events[0]?.status, "active")
   assert.equal(repository.state.requests.length, 5)
@@ -79,6 +81,7 @@ function createInMemoryDemoSeedRepository() {
       }
     >,
     requests: [] as Array<{ id: string; eventId: string; status: string; position: number | null; singerName: string }>,
+    invites: new Map<string, { eventId: string; code: string; status: string }>(),
     queueEvents: [] as Array<{ eventId: string; requestId: string | null; type: string }>
   }
 
@@ -128,6 +131,9 @@ function createInMemoryDemoSeedRepository() {
       }
       Object.assign(event, input)
       return event
+    },
+    async upsertEventInvite(input) {
+      state.invites.set(input.code, input)
     },
     async resetQueue(eventId) {
       state.queueEvents = state.queueEvents.filter((event) => event.eventId !== eventId)

@@ -21,6 +21,7 @@ import {
 } from "../http/validation.ts"
 import { allowedEventStaffRoles } from "./service.ts"
 import type { CreateEventInput, PatchEventInput, PatchEventStaffInput } from "./service.ts"
+import { resolveParticipantToken } from "../queue/participant.ts"
 
 const lifecycleActions = ["start", "pause", "resume", "close", "archive", "cancel"] as const
 
@@ -230,6 +231,13 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
 }
 
 export async function registerEventPublicRoutes(app: FastifyInstance): Promise<void> {
+  app.post("/public/invites/:inviteCode/claim", async (request, reply) => {
+    const inviteCode = readParamPublicId(request.params, "inviteCode")
+    resolveParticipantToken(request, reply)
+
+    return app.events.claimPublicInvite(inviteCode)
+  })
+
   app.get("/public/events/:eventPublicId", async (request) => {
     const eventPublicId = readParamPublicId(request.params, "eventPublicId")
     const detail = await app.events.getPublicEventById(eventPublicId)

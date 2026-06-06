@@ -2,6 +2,7 @@ import type {
   ActiveEventLookup,
   PublicEvent,
   PublicEventDetail,
+  PublicInviteClaimResponse,
   PublicMyRequest,
   PublicMyRequestsResponse,
   PublicQueue,
@@ -103,6 +104,17 @@ export function assertMyRequestsResponse(value: unknown): PublicMyRequestsRespon
 
   return {
     requests: value.requests
+  }
+}
+
+export function assertPublicInviteClaimResponse(value: unknown): PublicInviteClaimResponse {
+  if (!isRecord(value) || !isString(value.eventPublicId) || !isString(value.redirectTo)) {
+    throw invalidResponse("public invite claim")
+  }
+
+  return {
+    eventPublicId: value.eventPublicId,
+    redirectTo: value.redirectTo
   }
 }
 

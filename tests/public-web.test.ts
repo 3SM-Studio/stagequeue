@@ -4,6 +4,7 @@ import test from "node:test"
 import {
   buildPublicApiUrl,
   buildPublicVenueStreamUrl,
+  claimPublicInvite,
   getBrowserApiBaseUrl,
   getMyRequestsByVenueSlug,
   getPublicEventDetail,
@@ -37,6 +38,7 @@ import { validateSubmitSongRequest } from "../apps/public-web/lib/submitValidati
 import {
   assertActiveEventResponse,
   assertMyRequestsResponse,
+  assertPublicInviteClaimResponse,
   assertPublicEventDetailResponse,
   assertPublicQueueResponse,
   assertSubmitRequestResponse,
@@ -78,6 +80,30 @@ test("public-web API client builds event-first public event detail URL", async (
 
     assert.equal(detail.event.name, "Friday Karaoke")
     assert.equal(requestedUrl.endsWith("/public/events/ka2Md-d1das"), true)
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
+test("public-web invite claim client posts invite code with credentials include", async () => {
+  const previousFetch = globalThis.fetch
+  let requestedUrl = ""
+  let requestedMethod: string | undefined
+  let requestedCredentials: RequestCredentials | undefined
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input)
+    requestedMethod = init?.method
+    requestedCredentials = init?.credentials
+    return jsonResponse(validInviteClaimResponse())
+  }
+
+  try {
+    const claim = await claimPublicInvite("inviteCode1")
+
+    assert.equal(claim.redirectTo, "/event/ka2Md-d1das")
+    assert.equal(requestedUrl.endsWith("/public/invites/inviteCode1/claim"), true)
+    assert.equal(requestedMethod, "POST")
+    assert.equal(requestedCredentials, "include")
   } finally {
     globalThis.fetch = previousFetch
   }
@@ -304,6 +330,14 @@ test("public-web validates my-requests API responses", () => {
   assert.throws(
     () => assertMyRequestsResponse({ requests: [{ id: "request-1", status: "approved" }] }),
     /Invalid public API response: my requests/
+  )
+})
+
+test("public-web validates invite claim API responses", () => {
+  assert.equal(assertPublicInviteClaimResponse(validInviteClaimResponse()).eventPublicId, "ka2Md-d1das")
+  assert.throws(
+    () => assertPublicInviteClaimResponse({ eventPublicId: "ka2Md-d1das", redirectTo: 123 }),
+    /Invalid public API response: public invite claim/
   )
 })
 
@@ -731,6 +765,13 @@ function validSubmitResponse() {
 function validMyRequestsResponse(status: PublicMyRequest["status"] = "pending") {
   return {
     requests: [myRequest(status)]
+  }
+}
+
+function validInviteClaimResponse() {
+  return {
+    eventPublicId: "ka2Md-d1das",
+    redirectTo: "/event/ka2Md-d1das"
   }
 }
 
