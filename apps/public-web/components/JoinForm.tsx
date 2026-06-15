@@ -1,7 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { getMyRequestsByVenueSlug, submitSongRequestByVenueSlug, type PublicMyRequest } from "../lib/apiClient"
+import {
+  getMyRequestsByEventPublicId,
+  getMyRequestsByVenueSlug,
+  submitSongRequest,
+  submitSongRequestByVenueSlug,
+  type PublicMyRequest
+} from "../lib/apiClient"
 import {
   getMyRequestStatusMessage,
   getTrackedRequest,
@@ -11,7 +17,20 @@ import {
 } from "../lib/myRequestsState"
 import { validateSubmitSongRequest } from "../lib/submitValidation"
 
-export function JoinForm({ venueSlug }: { venueSlug: string }) {
+type JoinFormProps =
+  | {
+      eventPublicId: string
+      venueSlug?: never
+    }
+  | {
+      eventPublicId?: never
+      venueSlug: string
+    }
+
+export function JoinForm(props: JoinFormProps) {
+  const scopeKind = props.eventPublicId !== undefined ? "event" : "venue"
+  const eventPublicId = props.eventPublicId ?? ""
+  const venueSlug = props.venueSlug ?? ""
   const [errors, setErrors] = useState<string[]>([])
   const [status, setStatus] = useState<"idle" | "submitting" | "success">("idle")
   const [submittedSong, setSubmittedSong] = useState<string | null>(null)
@@ -31,7 +50,7 @@ export function JoinForm({ venueSlug }: { venueSlug: string }) {
     }
 
     setRefreshingStatus(true)
-    const request = getMyRequestsByVenueSlug(venueSlug)
+    const request = (scopeKind === "event" ? getMyRequestsByEventPublicId(eventPublicId) : getMyRequestsByVenueSlug(venueSlug))
       .then((response) => {
         setTrackedRequest((current) => getTrackedRequest(response.requests, trackedRequestId) ?? current)
         setRefreshError(null)
@@ -46,7 +65,7 @@ export function JoinForm({ venueSlug }: { venueSlug: string }) {
 
     inFlightRefresh.current = request
     return request
-  }, [trackedRequestId, venueSlug])
+  }, [eventPublicId, scopeKind, trackedRequestId, venueSlug])
 
   useEffect(() => {
     const onFocus = () => {
@@ -93,7 +112,10 @@ export function JoinForm({ venueSlug }: { venueSlug: string }) {
 
     setStatus("submitting")
     try {
-      const result = await submitSongRequestByVenueSlug(venueSlug, validation.value)
+      const result =
+        scopeKind === "event"
+          ? await submitSongRequest(eventPublicId, validation.value)
+          : await submitSongRequestByVenueSlug(venueSlug, validation.value)
       setSubmittedSong(`${result.request.songArtist} - ${result.request.songTitle}`)
       setTrackedRequestId(result.request.id)
       setTrackedRequest({

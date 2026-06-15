@@ -31,8 +31,11 @@ const VENUE_ID = "22222222-2222-4222-8222-222222222222"
 const ACTIVE_EVENT_ID = "33333333-3333-4333-8333-333333333333"
 const ACTIVE_EVENT_PUBLIC_ID = "ka2Md-d1das"
 const PAUSED_EVENT_ID = "44444444-4444-4444-8444-444444444444"
+const PAUSED_EVENT_PUBLIC_ID = "pausedEvent1"
 const SCHEDULED_EVENT_ID = "55555555-5555-4555-8555-555555555555"
+const SCHEDULED_EVENT_PUBLIC_ID = "scheduledEvent1"
 const CLOSED_EVENT_ID = "88888888-8888-4888-8888-888888888888"
+const CLOSED_EVENT_PUBLIC_ID = "closedEvent1"
 
 test("public submit creates pending request for active event and writes queue event", async () => {
   const queue = createInMemoryQueueService()
@@ -40,7 +43,7 @@ test("public submit creates pending request for active event and writes queue ev
   try {
     const response = await app.inject({
       method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
       payload: publicSubmitPayload("Michał", "Królowa Łez")
     })
 
@@ -64,7 +67,7 @@ test("public submit rate limit allows first requests and blocks the sixth for th
       responses.push(
         await app.inject({
           method: "POST",
-          url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+          url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
           payload: publicSubmitPayload(`Singer ${index + 1}`, `Song ${index + 1}`)
         })
       )
@@ -89,7 +92,7 @@ test("public submit without cookie sets participant cookie and stores only token
   try {
     const response = await app.inject({
       method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
       payload: publicSubmitPayload()
     })
     const token = readParticipantCookie(response)
@@ -112,14 +115,14 @@ test("public submit with cookie reuses the same participant token hash", async (
   try {
     const firstResponse = await app.inject({
       method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
       payload: publicSubmitPayload("Singer 1", "Song 1")
     })
     const token = readParticipantCookie(firstResponse)
     queue.setNow(new Date(first.getTime() + 21_000))
     const secondResponse = await app.inject({
       method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
       headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
       payload: publicSubmitPayload("Singer 2", "Song 2")
     })
@@ -217,6 +220,63 @@ test("venue-first my-requests returns all public request statuses for the partic
   }
 })
 
+test("event-first my-requests resolves event by publicId and returns only participant requests", async () => {
+  const ownerToken = "participant-token-event-public-id-owner"
+  const otherToken = "participant-token-event-public-id-other"
+  const ownerHash = hashParticipantToken(ownerToken, testConfig().participantTokenSecret)
+  const otherHash = hashParticipantToken(otherToken, testConfig().participantTokenSecret)
+  const queue = createInMemoryQueueService()
+  queue.addRequest(ACTIVE_EVENT_ID, "approved", {
+    participantTokenHash: ownerHash,
+    singerName: "Owner",
+    displayName: "Owner",
+    songArtist: "ABBA",
+    songTitle: "Dancing Queen",
+    position: 1
+  })
+  queue.addRequest(ACTIVE_EVENT_ID, "pending", {
+    participantTokenHash: otherHash,
+    singerName: "Other",
+    displayName: "Other",
+    songArtist: "NSYNC",
+    songTitle: "Bye Bye Bye"
+  })
+  const app = await createTestApp({ queue })
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/my-requests`,
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${ownerToken}` }
+    })
+    const body = response.json()
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(body.requests.length, 1)
+    assert.equal(body.requests[0].status, "approved")
+    assert.equal(body.requests[0].position, 1)
+    assert.equal(response.body.includes(ownerToken), false)
+    assert.equal(response.body.includes(ownerHash), false)
+    assert.equal(response.body.includes(otherHash), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("event-first my-requests without participant cookie returns an empty list", async () => {
+  const app = await createTestApp()
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/my-requests`
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json(), { requests: [] })
+  } finally {
+    await app.close()
+  }
+})
+
 test("venue-first my-requests returns empty when venue has no active or paused event", async () => {
   const token = "participant-token-no-active-event-12345"
   const participantTokenHash = hashParticipantToken(token, testConfig().participantTokenSecret)
@@ -253,7 +313,7 @@ test("max active requests per participant blocks another public submit", async (
       responses.push(
         await app.inject({
           method: "POST",
-          url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+          url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
           headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
           payload: publicSubmitPayload(`Singer ${index}`, `Song ${index}`)
         })
@@ -285,7 +345,7 @@ test("done rejected and skipped requests do not count against participant active
   try {
     const response = await app.inject({
       method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
       headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
       payload: publicSubmitPayload()
     })
@@ -305,21 +365,21 @@ test("participant cooldown blocks rapid submit and allows submit after cooldown"
   try {
     const first = await app.inject({
       method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
       headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
       payload: publicSubmitPayload("Singer 1", "Song 1")
     })
     queue.setNow(new Date(start.getTime() + 5_000))
     const blocked = await app.inject({
       method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
       headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
       payload: publicSubmitPayload("Singer 2", "Song 2")
     })
     queue.setNow(new Date(start.getTime() + 21_000))
     const allowed = await app.inject({
       method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
       headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
       payload: publicSubmitPayload("Singer 3", "Song 3")
     })
@@ -339,17 +399,17 @@ test("public submit is blocked for paused scheduled and closed events", async ()
   try {
     const paused = await app.inject({
       method: "POST",
-      url: `/public/events/${PAUSED_EVENT_ID}/requests`,
+      url: `/public/events/${PAUSED_EVENT_PUBLIC_ID}/requests`,
       payload: publicSubmitPayload()
     })
     const scheduled = await app.inject({
       method: "POST",
-      url: `/public/events/${SCHEDULED_EVENT_ID}/requests`,
+      url: `/public/events/${SCHEDULED_EVENT_PUBLIC_ID}/requests`,
       payload: publicSubmitPayload()
     })
     const closed = await app.inject({
       method: "POST",
-      url: `/public/events/${CLOSED_EVENT_ID}/requests`,
+      url: `/public/events/${CLOSED_EVENT_PUBLIC_ID}/requests`,
       payload: publicSubmitPayload()
     })
 
@@ -378,7 +438,7 @@ test("public submit is blocked when publicJoinEnabled is false", async () => {
   try {
     const response = await app.inject({
       method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
       payload: publicSubmitPayload()
     })
 
@@ -400,7 +460,6 @@ test("public event detail returns active public event", async () => {
     const body = response.json()
 
     assert.equal(response.statusCode, 200)
-    assert.equal(body.event.id, ACTIVE_EVENT_ID)
     assert.equal(body.event.publicId, ACTIVE_EVENT_PUBLIC_ID)
     assert.equal(body.event.name, "Active Event")
     assert.equal(body.event.status, "active")
@@ -411,6 +470,9 @@ test("public event detail returns active public event", async () => {
     assert.equal(body.operatedByOrganization.slug, "poza-nuta-demo")
     assert.equal(body.submissions.enabled, true)
     assert.equal(body.publicQueue.visible, true)
+    assert.equal(response.body.includes(ACTIVE_EVENT_ID), false)
+    assert.equal("id" in body.event, false)
+    assert.equal("id" in body.operatedByOrganization, false)
   } finally {
     await app.close()
   }
@@ -424,7 +486,6 @@ test("public event detail does not use internal event id as public id", async ()
         eventPublicId === ACTIVE_EVENT_PUBLIC_ID
           ? {
               event: {
-                id: ACTIVE_EVENT_ID,
                 publicId: ACTIVE_EVENT_PUBLIC_ID,
                 name: "Active Event",
                 slug: "active-event",
@@ -434,8 +495,8 @@ test("public event detail does not use internal event id as public id", async ()
                 publicJoinEnabled: true,
                 publicQueueEnabled: true
               },
-              venue: { id: VENUE_ID, slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
-              operatedByOrganization: { id: "77777777-7777-4777-8777-777777777777", slug: "poza-nuta-demo", name: "Poza Nuta Demo" },
+              venue: { slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
+              operatedByOrganization: { slug: "poza-nuta-demo", name: "Poza Nuta Demo" },
               submissions: { enabled: true },
               publicQueue: { visible: true }
             }
@@ -679,7 +740,7 @@ test("event-id public submit hides events from non-public venues and organizatio
     try {
       const response = await app.inject({
         method: "POST",
-        url: `/public/events/${ACTIVE_EVENT_ID}/requests`,
+        url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
         payload: publicSubmitPayload()
       })
 
@@ -698,11 +759,11 @@ test("public queue shows now and approved queue without private notes", async ()
   const now = queue.addRequest(ACTIVE_EVENT_ID, "now", { songTitle: "Dancing Queen" })
   const app = await createTestApp({ queue })
   try {
-    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue` })
     const body = response.json()
 
     assert.equal(response.statusCode, 200)
-    assert.equal(body.event.id, ACTIVE_EVENT_ID)
+    assert.equal(body.event.publicId, ACTIVE_EVENT_PUBLIC_ID)
     assert.equal(body.event.name, "Active Event")
     assert.equal(body.event.status, "active")
     assert.equal(body.venue.id, VENUE_ID)
@@ -715,6 +776,19 @@ test("public queue shows now and approved queue without private notes", async ()
     assert.equal(body.queue[0].position, 1)
     assert.equal(body.submissions.enabled, true)
     assert.equal("note" in body.queue[0], false)
+    assert.equal(response.body.includes(ACTIVE_EVENT_ID), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("event-first public queue does not accept internal event UUID as public id", async () => {
+  const app = await createTestApp()
+  try {
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+
+    assert.equal(response.statusCode, 404)
+    assert.equal(response.json().error.code, "NOT_FOUND")
   } finally {
     await app.close()
   }
@@ -731,7 +805,7 @@ test("public queue is forbidden when publicQueueEnabled is false", async () => {
     queue: createQueueService(db.db)
   })
   try {
-    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue` })
 
     assert.equal(response.statusCode, 403)
     assert.equal(response.json().error.code, "FORBIDDEN")
@@ -761,7 +835,7 @@ test("event-id public queue hides events from non-public venues and organization
       queue: createQueueService(db.db)
     })
     try {
-      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue` })
 
       assert.equal(response.statusCode, 404)
       assert.equal(response.json().error.code, "NOT_FOUND")
@@ -794,7 +868,7 @@ test("venue-first and event-id public queue share venue and organization visibil
     })
     try {
       const venueFirst = await app.inject({ method: "GET", url: "/public/venues/klub-x/queue" })
-      const eventId = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+      const eventId = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue` })
 
       for (const response of [venueFirst, eventId]) {
         assert.equal(response.statusCode, 404)
@@ -815,7 +889,7 @@ test("public queue snapshot is visible for active paused and closed events", asy
       queue: createQueueService(db.db)
     })
     try {
-      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue` })
 
       assert.equal(response.statusCode, 200)
       assert.equal(response.json().event.status, status)
@@ -837,7 +911,7 @@ test("public queue snapshot is hidden for archived and cancelled events", async 
       queue: createQueueService(db.db)
     })
     try {
-      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue` })
 
       assert.equal(response.statusCode, 409)
       assert.equal(response.json().error.code, "CONFLICT")
@@ -862,7 +936,7 @@ test("venue-first and event-id public queue share archived and cancelled policy"
     })
     try {
       const venueFirst = await app.inject({ method: "GET", url: "/public/venues/klub-x/queue" })
-      const eventId = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_ID}/queue` })
+      const eventId = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue` })
 
       for (const response of [venueFirst, eventId]) {
         assert.equal(response.statusCode, 409)
@@ -880,7 +954,7 @@ test("public queue for paused event is visible with submissions disabled", async
   queue.addRequest(PAUSED_EVENT_ID, "approved", { position: 1 })
   const app = await createTestApp({ queue })
   try {
-    const response = await app.inject({ method: "GET", url: `/public/events/${PAUSED_EVENT_ID}/queue` })
+    const response = await app.inject({ method: "GET", url: `/public/events/${PAUSED_EVENT_PUBLIC_ID}/queue` })
     const body = response.json()
 
     assert.equal(response.statusCode, 200)
@@ -938,8 +1012,8 @@ test("venue-first public queue resolves active event and hides operator note", a
     const body = response.json()
 
     assert.equal(response.statusCode, 200)
-    assert.equal(body.activeEvent.id, ACTIVE_EVENT_ID)
-    assert.equal(body.event.id, ACTIVE_EVENT_ID)
+    assert.equal(body.activeEvent.publicId, "activeEvent1")
+    assert.equal(body.event.publicId, ACTIVE_EVENT_PUBLIC_ID)
     assert.equal(body.queue[0].id, approved.id)
     assert.equal("note" in body.queue[0], false)
     assert.equal(body.submissions.enabled, true)
@@ -1527,7 +1601,7 @@ async function createTestApp(options: {
 }
 
 type InMemoryQueueState = {
-  events: Map<string, { id: string; name: string; status: string }>
+  events: Map<string, { id: string; publicId: string; name: string; status: string }>
   requests: QueueSongRequest[]
   queueEvents: Array<{ eventId: string; requestId: string; type: string }>
 }
@@ -1548,10 +1622,13 @@ function createInMemoryQueueService(options: { now?: Date } = {}): TestQueueServ
   let currentTime = options.now ?? new Date()
   const state: InMemoryQueueState = {
     events: new Map([
-      [ACTIVE_EVENT_ID, { id: ACTIVE_EVENT_ID, name: "Active Event", status: "active" }],
-      [PAUSED_EVENT_ID, { id: PAUSED_EVENT_ID, name: "Paused Event", status: "paused" }],
-      [SCHEDULED_EVENT_ID, { id: SCHEDULED_EVENT_ID, name: "Scheduled Event", status: "scheduled" }],
-      [CLOSED_EVENT_ID, { id: CLOSED_EVENT_ID, name: "Closed Event", status: "closed" }]
+      [ACTIVE_EVENT_ID, { id: ACTIVE_EVENT_ID, publicId: ACTIVE_EVENT_PUBLIC_ID, name: "Active Event", status: "active" }],
+      [PAUSED_EVENT_ID, { id: PAUSED_EVENT_ID, publicId: PAUSED_EVENT_PUBLIC_ID, name: "Paused Event", status: "paused" }],
+      [
+        SCHEDULED_EVENT_ID,
+        { id: SCHEDULED_EVENT_ID, publicId: SCHEDULED_EVENT_PUBLIC_ID, name: "Scheduled Event", status: "scheduled" }
+      ],
+      [CLOSED_EVENT_ID, { id: CLOSED_EVENT_ID, publicId: CLOSED_EVENT_PUBLIC_ID, name: "Closed Event", status: "closed" }]
     ]),
     requests: [],
     queueEvents: []
@@ -1569,7 +1646,11 @@ function createInMemoryQueueService(options: { now?: Date } = {}): TestQueueServ
         throw new ApiHttpError(409, "CONFLICT", "Queue is not active for this event")
       }
       return {
-        event,
+        event: {
+          publicId: event.publicId,
+          name: event.name,
+          status: event.status
+        },
         venue: { id: VENUE_ID, name: "Klub X", slug: "klub-x" },
         now: toPublic(state.requests.find((request) => request.eventId === eventId && request.status === "now") ?? null),
         queue: approvedRequests(state, eventId).map(toPublicItem),
@@ -1863,9 +1944,48 @@ function fakeVenuesService(): ApiModuleServices["venues"] {
 
 function fakeEventsService(options: { lookup?: PublicActiveEventLookup | null } = {}): ApiModuleServices["events"] {
   return {
+    resolvePublicEventByPublicId: async (eventPublicId: string) => {
+      const event = findPublicEventResolution(eventPublicId)
+      if (event) {
+        return event
+      }
+      const lookup = "lookup" in options ? options.lookup : makePublicLookup(makePublicEvent(ACTIVE_EVENT_ID, "active"))
+      const activeEvent = lookup?.activeEvent
+      if (activeEvent?.publicId === eventPublicId) {
+        return {
+          id: activeEvent.id,
+          publicId: activeEvent.publicId,
+          venueId: activeEvent.venueId,
+          status: activeEvent.status,
+          publicJoinEnabled: activeEvent.publicJoinEnabled,
+          publicQueueEnabled: activeEvent.publicQueueEnabled
+        }
+      }
+      return null
+    },
     getPublicActiveEventByVenueSlug: async () =>
       "lookup" in options ? options.lookup : makePublicLookup(makePublicEvent(ACTIVE_EVENT_ID, "active"))
   } as unknown as ApiModuleServices["events"]
+}
+
+function findPublicEventResolution(eventPublicId: string) {
+  const events = [
+    { id: ACTIVE_EVENT_ID, publicId: ACTIVE_EVENT_PUBLIC_ID, status: "active" },
+    { id: PAUSED_EVENT_ID, publicId: PAUSED_EVENT_PUBLIC_ID, status: "paused" },
+    { id: SCHEDULED_EVENT_ID, publicId: SCHEDULED_EVENT_PUBLIC_ID, status: "scheduled" },
+    { id: CLOSED_EVENT_ID, publicId: CLOSED_EVENT_PUBLIC_ID, status: "closed" }
+  ]
+  const event = events.find((candidate) => candidate.publicId === eventPublicId)
+  return event
+    ? {
+        id: event.id,
+        publicId: event.publicId,
+        venueId: VENUE_ID,
+        status: event.status,
+        publicJoinEnabled: true,
+        publicQueueEnabled: true
+      }
+    : null
 }
 
 function makePublicLookup(activeEvent: EventSummary | null): PublicActiveEventLookup {
@@ -1949,6 +2069,7 @@ function fakeDbForQueueEventContext(event: {
         {
           event: {
             id: ACTIVE_EVENT_ID,
+            publicId: ACTIVE_EVENT_PUBLIC_ID,
             venueId: VENUE_ID,
             operatedByOrganizationId: "77777777-7777-4777-8777-777777777777",
             name: "Active Event",
@@ -1980,6 +2101,7 @@ function fakeDbForPublicQueueStatus(status: string): DbResources {
           {
             event: {
               id: ACTIVE_EVENT_ID,
+              publicId: ACTIVE_EVENT_PUBLIC_ID,
               venueId: VENUE_ID,
               operatedByOrganizationId: "77777777-7777-4777-8777-777777777777",
               name: "Public Queue Event",

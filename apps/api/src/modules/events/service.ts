@@ -79,7 +79,6 @@ export type PublicActiveEventLookup = {
 
 export type PublicEventDetail = {
   event: {
-    id: string
     publicId: string
     name: string
     slug: string
@@ -90,14 +89,12 @@ export type PublicEventDetail = {
     publicQueueEnabled: boolean
   }
   venue: {
-    id: string
     slug: string
     name: string
     city: string | null
     timezone: string
   }
   operatedByOrganization: {
-    id: string
     slug: string
     name: string
   }
@@ -109,6 +106,15 @@ export type PublicEventDetail = {
     visible: boolean
     reason?: string
   }
+}
+
+export type PublicEventResolution = {
+  id: string
+  publicId: string
+  venueId: string
+  status: string
+  publicJoinEnabled: boolean
+  publicQueueEnabled: boolean
 }
 
 export type PublicInviteClaim = {
@@ -170,6 +176,7 @@ export type EventsService = {
   organizationHasActiveVenueAccess(organizationId: string, venueId: string): Promise<boolean>
   userIsActiveOrganizationMember(userId: string, organizationId: string): Promise<boolean>
   getPublicActiveEventByVenueSlug(venueSlug: string): Promise<PublicActiveEventLookup | null>
+  resolvePublicEventByPublicId(eventPublicId: string): Promise<PublicEventResolution | null>
   getPublicEventById(eventPublicId: string): Promise<PublicEventDetail | null>
   claimPublicInvite(inviteCode: string): Promise<PublicInviteClaim>
 }
@@ -534,6 +541,34 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
       }
     },
 
+    async resolvePublicEventByPublicId(eventPublicId) {
+      const rows = await db
+        .select(publicEventResolutionSelection)
+        .from(events)
+        .innerJoin(venues, eq(events.venueId, venues.id))
+        .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+        .where(eq(events.publicId, eventPublicId))
+        .limit(1)
+      const row = rows[0]
+      if (!row) {
+        return null
+      }
+
+      assertPublicEventContainerVisible({
+        venue: row.venue,
+        organization: row.organization
+      })
+
+      return {
+        id: row.event.id,
+        publicId: row.event.publicId,
+        venueId: row.event.venueId,
+        status: row.event.status,
+        publicJoinEnabled: row.event.publicJoinEnabled,
+        publicQueueEnabled: row.event.publicQueueEnabled
+      }
+    },
+
     async getPublicEventById(eventPublicId) {
       const rows = await db
         .select(publicEventDetailSelection)
@@ -555,7 +590,6 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
 
       return {
         event: {
-          id: row.event.id,
           publicId: row.event.publicId,
           name: row.event.name,
           slug: row.event.slug,
@@ -566,14 +600,12 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           publicQueueEnabled: row.event.publicQueueEnabled
         },
         venue: {
-          id: row.venue.id,
           slug: row.venue.slug,
           name: row.venue.name,
           city: row.venue.city,
           timezone: row.venue.timezone
         },
         operatedByOrganization: {
-          id: row.organization.id,
           slug: row.organization.slug,
           name: row.organization.name
         },
@@ -791,7 +823,6 @@ const dashboardEventSelection = {
 
 const publicEventDetailSelection = {
   event: {
-    id: events.id,
     publicId: events.publicId,
     name: events.name,
     slug: events.slug,
@@ -802,7 +833,6 @@ const publicEventDetailSelection = {
     publicQueueEnabled: events.publicQueueEnabled
   },
   venue: {
-    id: venues.id,
     slug: venues.slug,
     name: venues.name,
     city: venues.city,
@@ -811,9 +841,26 @@ const publicEventDetailSelection = {
     verificationStatus: venues.verificationStatus
   },
   organization: {
-    id: organizations.id,
     slug: organizations.slug,
     name: organizations.name,
+    status: organizations.status
+  }
+}
+
+const publicEventResolutionSelection = {
+  event: {
+    id: events.id,
+    publicId: events.publicId,
+    venueId: events.venueId,
+    status: events.status,
+    publicJoinEnabled: events.publicJoinEnabled,
+    publicQueueEnabled: events.publicQueueEnabled
+  },
+  venue: {
+    status: venues.status,
+    verificationStatus: venues.verificationStatus
+  },
+  organization: {
     status: organizations.status
   }
 }

@@ -49,7 +49,7 @@ export async function registerQueuePublicRoutes(app: FastifyInstance): Promise<v
 
     return {
       ...(await app.queue.getPublicQueue(lookup.activeEvent.id)),
-      activeEvent: lookup.activeEvent
+      activeEvent: toPublicActiveEvent(lookup.activeEvent)
     }
   })
 
@@ -105,18 +105,42 @@ export async function registerQueuePublicRoutes(app: FastifyInstance): Promise<v
   )
 
   app.get("/public/events/:eventPublicId/stream", async (request, reply) => {
-    const eventId = readParamUuid(request.params, "eventPublicId")
-    await app.queue.getPublicQueue(eventId)
+    const event = await requirePublicEventByPublicId(app, readPublicEventId(request.params))
+    await app.queue.getPublicQueue(event.id)
 
     return startEventStream(app, reply, {
-      channel: app.eventBus.eventChannel(eventId),
-      connected: { scope: "public.event", eventId }
+      channel: app.eventBus.eventChannel(event.id),
+      connected: { scope: "public.event", eventPublicId: event.publicId }
     })
   })
 
   app.get("/public/events/:eventPublicId/queue", async (request) => {
-    const eventId = readParamUuid(request.params, "eventPublicId")
-    return app.queue.getPublicQueue(eventId)
+    const event = await requirePublicEventByPublicId(app, readPublicEventId(request.params))
+    return app.queue.getPublicQueue(event.id)
+  })
+
+  app.get("/public/events/:eventPublicId/my-requests", async (request) => {
+    const event = await requirePublicEventByPublicId(app, readPublicEventId(request.params))
+    const participantToken = request.cookies[PARTICIPANT_COOKIE_NAME]
+
+    if (!isValidParticipantToken(participantToken)) {
+      return { requests: [] }
+    }
+
+    const participantTokenHash = hashParticipantToken(participantToken, request.server.config.participantTokenSecret)
+    const requests = await app.queue.listParticipantRequests(event.id, participantTokenHash)
+
+    return {
+      requests: requests.map((requestRecord) => ({
+        id: requestRecord.id,
+        status: requestRecord.status,
+        singerName: requestRecord.singerName,
+        artist: requestRecord.artist,
+        title: requestRecord.title,
+        position: requestRecord.position,
+        createdAt: requestRecord.createdAt
+      }))
+    }
   })
 
   app.post(
@@ -133,8 +157,8 @@ export async function registerQueuePublicRoutes(app: FastifyInstance): Promise<v
       }
     },
     async (request, reply) => {
-      const eventId = readParamUuid(request.params, "eventPublicId")
-      const requestRecord = await app.queue.submitPublicRequest(eventId, readSubmitPublicRequestInput(request, reply))
+      const event = await requirePublicEventByPublicId(app, readPublicEventId(request.params))
+      const requestRecord = await app.queue.submitPublicRequest(event.id, readSubmitPublicRequestInput(request, reply))
 
       reply.code(201)
       return toPublicRequestResponse(requestRecord)
@@ -296,6 +320,19 @@ function toPublicRequestResponse(requestRecord: QueueSongRequest) {
   }
 }
 
+function toPublicActiveEvent(event: Awaited<ReturnType<typeof requireVenueActiveEvent>>) {
+  return {
+    publicId: event.publicId,
+    name: event.name,
+    slug: event.slug,
+    status: event.status,
+    startsAt: event.startsAt,
+    endsAt: event.endsAt,
+    publicJoinEnabled: event.publicJoinEnabled,
+    publicQueueEnabled: event.publicQueueEnabled
+  }
+}
+
 async function requirePublicVenueLookup(app: FastifyInstance, venueSlug: string) {
   const lookup = await app.events.getPublicActiveEventByVenueSlug(venueSlug)
   if (!lookup) {
@@ -312,6 +349,28 @@ async function requireVenueActiveEvent(app: FastifyInstance, venueSlug: string) 
   }
 
   return lookup.activeEvent
+}
+
+async function requirePublicEventByPublicId(app: FastifyInstance, eventPublicId: string) {
+  const event = await app.events.resolvePublicEventByPublicId(eventPublicId)
+  if (!event) {
+    throw new ApiHttpError(404, "NOT_FOUND", "Missing event")
+  }
+
+  return event
+}
+
+function readPublicEventId(params: unknown): string {
+  if (typeof params !== "object" || params === null || !("eventPublicId" in params)) {
+    throw new ApiHttpError(400, "BAD_REQUEST", "Missing eventPublicId")
+  }
+
+  const eventPublicId = (params as { eventPublicId?: unknown }).eventPublicId
+  if (typeof eventPublicId !== "string" || eventPublicId.length === 0 || eventPublicId.length > 120) {
+    throw new ApiHttpError(400, "BAD_REQUEST", "Invalid eventPublicId")
+  }
+
+  return eventPublicId
 }
 
 function readRateLimitEventId(params: unknown): string {

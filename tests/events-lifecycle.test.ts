@@ -730,6 +730,19 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
         activeEvent: [...state.events.values()].find((event) => event.status === "active" || event.status === "paused") ?? null
       }
     },
+    async resolvePublicEventByPublicId(eventPublicId) {
+      const event = [...state.events.values()].find((candidate) => candidate.publicId === eventPublicId)
+      return event
+        ? {
+            id: event.id,
+            publicId: event.publicId,
+            venueId: event.venueId,
+            status: event.status,
+            publicJoinEnabled: event.publicJoinEnabled,
+            publicQueueEnabled: event.publicQueueEnabled
+          }
+        : null
+    },
     async getPublicEventById(eventPublicId): Promise<PublicEventDetail | null> {
       const event = [...state.events.values()].find((candidate) => candidate.publicId === eventPublicId)
       if (!event || !["scheduled", "active", "paused", "closed"].includes(event.status)) {
@@ -738,7 +751,6 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
 
       return {
         event: {
-          id: event.id,
           publicId: event.publicId,
           name: event.name,
           slug: event.slug,
@@ -748,8 +760,8 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
           publicJoinEnabled: event.publicJoinEnabled,
           publicQueueEnabled: event.publicQueueEnabled
         },
-        venue: { id: VENUE_ID, slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
-        operatedByOrganization: { id: ORG_ID, slug: "org-x", name: "Org X" },
+        venue: { slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
+        operatedByOrganization: { slug: "org-x", name: "Org X" },
         submissions: event.status === "active" && event.publicJoinEnabled ? { enabled: true } : { enabled: false },
         publicQueue:
           ["active", "paused", "closed"].includes(event.status) && event.publicQueueEnabled
