@@ -780,6 +780,22 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
         eventPublicId: event.publicId,
         redirectTo: `/event/${event.publicId}`
       }
+    },
+    async revokeEventInvite(eventId) {
+      requiredEvent(state, eventId)
+      state.invites.delete(eventId)
+      return { invite: null }
+    },
+    async rotateEventInvite(eventId) {
+      const event = requiredEvent(state, eventId)
+      const code = `invite-${event.slug}-rotated`
+      state.invites.set(eventId, code)
+      return {
+        invite: {
+          code,
+          urlPath: `/invite/${code}`
+        }
+      }
     }
   }
 

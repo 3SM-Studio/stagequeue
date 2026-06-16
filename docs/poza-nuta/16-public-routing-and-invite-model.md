@@ -158,6 +158,9 @@ Direct `/event/:eventPublicId` access and invite access are separate:
 - invite code can be revoked or rotated without changing the event URL;
 - participant identity still uses anonymous participant cookie, not accounts;
 - participant access must never be passed through query string tokens after the invite has been claimed.
+- revoking an invite blocks future claims for that invite code only; it does not revoke already granted participant access.
+- rotating an invite changes the usable invite link/code by revoking the old code and issuing a new active code for the event.
+- neither revoke nor rotate removes rows from `participant_event_access`; participant access revoke is a separate future capability.
 
 Rules:
 
@@ -225,6 +228,8 @@ Realtime implementation should preserve the current safety lessons:
    - invite generation/rotation/revocation backend contract;
    - `/invite/:inviteCode` claim endpoint/page;
    - redirect to `/event/:eventPublicId`.
+   - Future dashboard work: add a small invite management panel for revoke/rotate once the dashboard invite surface is stable.
+   - Future access work: add explicit participant access revoke if operators need to remove already granted participant access.
 6. Migrate legacy venue-first routes:
    - redirect `/:venueSlug` to `/@:handle`;
    - redirect or controlled-select `/:venueSlug/join`;
