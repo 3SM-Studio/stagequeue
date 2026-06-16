@@ -27,3 +27,9 @@ data/dumps/
 data_old/
 *.dump
 *.backup
+
+next-env.d.ts
+**/*/next-env.d.ts
+
+# Next.js generated type files
+apps/*/next-env.d.ts
