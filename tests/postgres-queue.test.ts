@@ -5,7 +5,7 @@ import { createApiApp } from "../apps/api/src/app.ts"
 import type { AuthenticatedDomainUser } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
-import { participantEventAccess, queueEvents, songRequests } from "../packages/db/src/schema.ts"
+import { eventInvites, participantEventAccess, queueEvents, songRequests } from "../packages/db/src/schema.ts"
 import {
   createEventsService,
   type EventSummary,
@@ -799,6 +799,128 @@ test("duplicate invite claim does not create duplicate participant access", asyn
     assert.equal(readAccessRows(db).length, 1)
   } finally {
     await app.close()
+  }
+})
+
+test("revoke invite is idempotent and blocks future claims without granting access", async () => {
+  const db = fakeDbForInviteMutation({ joinAccessMode: "invite_required" })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const firstRevoke = await app.inject({ method: "POST", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite/revoke` })
+    const secondRevoke = await app.inject({ method: "POST", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite/revoke` })
+    const claim = await app.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
+
+    assert.equal(firstRevoke.statusCode, 200)
+    assert.equal(firstRevoke.json().invite, null)
+    assert.equal(secondRevoke.statusCode, 200)
+    assert.equal(secondRevoke.json().invite, null)
+    assert.equal(claim.statusCode, 404)
+    assert.equal(claim.json().error.code, "NOT_FOUND")
+    assert.equal(claim.json().error.message, "Invalid or expired invite")
+    assert.equal(readAccessRows(db).length, 0)
+  } finally {
+    await app.close()
+  }
+})
+
+test("revoke invite does not remove existing participant access and submit still works", async () => {
+  const token = "participant-token-before-revoke-123"
+  const participantTokenHash = hashParticipantToken(token, testConfig().participantTokenSecret)
+  const db = fakeDbForInviteMutation({
+    joinAccessMode: "invite_required",
+    accessRows: [{ eventId: ACTIVE_EVENT_ID, participantTokenHash, grantedByInviteId: "invite-1" }]
+  })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const revoke = await app.inject({ method: "POST", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite/revoke` })
+
+    assert.equal(revoke.statusCode, 200)
+    assert.equal(readAccessRows(db).length, 1)
+  } finally {
+    await app.close()
+  }
+
+  const submitDb = fakeDbForQueueSubmit({
+    joinAccessMode: "invite_required",
+    accessRows: readAccessRows(db)
+  })
+  const submitApp = await createTestApp({
+    db: submitDb,
+    queue: createQueueService(submitDb.db)
+  })
+  try {
+    const response = await submitApp.inject({
+      method: "POST",
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
+      payload: publicSubmitPayload()
+    })
+
+    assert.equal(response.statusCode, 201)
+    assert.equal(submitDb.state.requests.length, 1)
+  } finally {
+    await submitApp.close()
+  }
+})
+
+test("rotate invalidates old invite code and new code can be claimed", async () => {
+  const existingToken = "participant-token-before-rotate-123"
+  const existingParticipantTokenHash = hashParticipantToken(existingToken, testConfig().participantTokenSecret)
+  const db = fakeDbForInviteMutation({
+    joinAccessMode: "invite_required",
+    accessRows: [{ eventId: ACTIVE_EVENT_ID, participantTokenHash: existingParticipantTokenHash, grantedByInviteId: "invite-1" }]
+  })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const rotate = await app.inject({ method: "POST", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite/rotate` })
+    const oldClaim = await app.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
+    const newCode = rotate.json().invite.code
+    const newClaim = await app.inject({ method: "POST", url: `/public/invites/${newCode}/claim` })
+
+    assert.equal(rotate.statusCode, 200)
+    assert.match(newCode, /^[A-Za-z0-9_-]{8,80}$/)
+    assert.notEqual(newCode, "inviteCode1")
+    assert.equal(rotate.json().invite.urlPath, `/invite/${newCode}`)
+    assert.equal(oldClaim.statusCode, 404)
+    assert.equal(newClaim.statusCode, 200)
+    assert.equal(newClaim.json().redirectTo, `/event/${ACTIVE_EVENT_PUBLIC_ID}`)
+    assert.equal(readAccessRows(db).length, 2)
+  } finally {
+    await app.close()
+  }
+
+  const submitDb = fakeDbForQueueSubmit({
+    joinAccessMode: "invite_required",
+    accessRows: readAccessRows(db)
+  })
+  const submitApp = await createTestApp({
+    db: submitDb,
+    queue: createQueueService(submitDb.db)
+  })
+  try {
+    const response = await submitApp.inject({
+      method: "POST",
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${existingToken}` },
+      payload: publicSubmitPayload()
+    })
+
+    assert.equal(response.statusCode, 201)
+    assert.equal(submitDb.state.requests.length, 1)
+  } finally {
+    await submitApp.close()
   }
 })
 
@@ -2478,6 +2600,136 @@ function fakeDbForPublicEventDetail(event: {
   } as unknown as DbResources["db"])
 }
 
+function fakeDbForInviteMutation(options: {
+  status?: string
+  joinAccessMode: "open" | "invite_required"
+  accessRows?: ParticipantAccessRow[]
+}): DbResources & {
+  state: {
+    invites: Array<{ id: string; eventId: string; code: string; status: string; expiresAt: Date | null }>
+  }
+} {
+  const accessRows = [...(options.accessRows ?? [])]
+  const state = {
+    invites: [
+      {
+        id: "invite-1",
+        eventId: ACTIVE_EVENT_ID,
+        code: "inviteCode1",
+        status: "active",
+        expiresAt: null
+      }
+    ]
+  }
+  const event = {
+    id: ACTIVE_EVENT_ID,
+    publicId: ACTIVE_EVENT_PUBLIC_ID,
+    venueId: VENUE_ID,
+    operatedByOrganizationId: "77777777-7777-4777-8777-777777777777",
+    createdByUserId: USER_ID,
+    name: "Active Event",
+    slug: "active-event",
+    status: options.status ?? "active",
+    startsAt: null,
+    endsAt: null,
+    publicJoinEnabled: true,
+    publicQueueEnabled: true,
+    joinAccessMode: options.joinAccessMode
+  }
+  const client = {
+    transaction: async <T>(action: (tx: DbResources["db"]) => Promise<T>) => action(client as unknown as DbResources["db"]),
+    select: (selection?: Record<string, unknown>) => {
+      if (selection && "invite" in selection) {
+        return queryChainWithWhere((condition) => {
+          const code = extractSqlStringParam(condition)
+          const invite = state.invites.find((candidate) => candidate.code === code)
+          return invite
+            ? [
+                {
+                  invite: {
+                    id: invite.id,
+                    status: invite.status,
+                    expiresAt: invite.expiresAt
+                  },
+                  event,
+                  venue: {
+                    status: "active",
+                    verificationStatus: "verified"
+                  },
+                  organization: {
+                    status: "active"
+                  }
+                }
+              ]
+            : []
+        })
+      }
+
+      if (selection && "publicId" in selection && "venueId" in selection) {
+        return queryChain([event])
+      }
+
+      return queryChain([])
+    },
+    update: (table: unknown) => ({
+      set: (values: { status?: string }) => ({
+        where: () => {
+          if (table === eventInvites && values.status === "revoked") {
+            for (const invite of state.invites) {
+              if (invite.eventId === ACTIVE_EVENT_ID && invite.status === "active") {
+                invite.status = "revoked"
+              }
+            }
+          }
+          return []
+        }
+      })
+    }),
+    insert: (table: unknown) => ({
+      values: (value: { eventId: string; code?: string; status?: string; participantTokenHash?: string; grantedByInviteId?: string | null }) => {
+        if (table === eventInvites) {
+          state.invites.push({
+            id: `invite-${state.invites.length + 1}`,
+            eventId: value.eventId,
+            code: value.code ?? `invite-${state.invites.length + 1}`,
+            status: value.status ?? "active",
+            expiresAt: null
+          })
+          return undefined
+        }
+
+        if (table === participantEventAccess) {
+          return {
+            onConflictDoNothing: async () => {
+              if (
+                value.participantTokenHash &&
+                !accessRows.some((row) => row.eventId === value.eventId && row.participantTokenHash === value.participantTokenHash)
+              ) {
+                accessRows.push({
+                  eventId: value.eventId,
+                  participantTokenHash: value.participantTokenHash,
+                  grantedByInviteId: value.grantedByInviteId ?? null
+                })
+              }
+            }
+          }
+        }
+
+        throw new Error("Unexpected insert")
+      }
+    }),
+    accessRows
+  }
+
+  return {
+    db: Object.assign({ execute: async () => [] }, client) as unknown as DbResources["db"],
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"],
+    state
+  }
+}
+
 function fakeDbForPublicInviteClaim(event: {
   status: string
   inviteStatus?: string
@@ -2571,6 +2823,33 @@ function queryChain<T>(result: T[]) {
       return result
     }
   }
+}
+
+function queryChainWithWhere<T>(resolve: (condition: unknown) => T[]) {
+  let result: T[] = []
+  return {
+    from() {
+      return this
+    },
+    innerJoin() {
+      return this
+    },
+    leftJoin() {
+      return this
+    },
+    where(condition: unknown) {
+      result = resolve(condition)
+      return this
+    },
+    limit() {
+      return result
+    }
+  }
+}
+
+function extractSqlStringParam(condition: unknown): string | undefined {
+  const chunks = (condition as { queryChunks?: Array<{ value?: unknown }> } | null)?.queryChunks
+  return chunks?.find((chunk) => typeof chunk.value === "string")?.value as string | undefined
 }
 
 function fakeAuth() {

@@ -127,6 +127,15 @@ export type PublicInviteClaim = {
   redirectTo: string
 }
 
+export type DashboardInviteLink = {
+  code: string
+  urlPath: string
+}
+
+export type DashboardInviteMutationResult = {
+  invite: DashboardInviteLink | null
+}
+
 export type CreateEventInput = {
   venueId: string
   operatedByOrganizationId?: string
@@ -186,6 +195,8 @@ export type EventsService = {
   resolvePublicEventByPublicId(eventPublicId: string): Promise<PublicEventResolution | null>
   getPublicEventById(eventPublicId: string, participantTokenHash?: string): Promise<PublicEventDetail | null>
   claimPublicInvite(inviteCode: string, participantTokenHash: string): Promise<PublicInviteClaim>
+  revokeEventInvite(eventId: string): Promise<DashboardInviteMutationResult>
+  rotateEventInvite(eventId: string): Promise<DashboardInviteMutationResult>
 }
 
 const lifecycleTransitions = {
@@ -677,6 +688,30 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           redirectTo: `/event/${row.event.publicId}`
         }
       })
+    },
+
+    async revokeEventInvite(eventId) {
+      await inTransaction(db, async (tx) => {
+        await getEventForUpdate(tx, eventId)
+        await tx
+          .update(eventInvites)
+          .set({ status: "revoked" })
+          .where(and(eq(eventInvites.eventId, eventId), eq(eventInvites.status, "active")))
+      })
+
+      return { invite: null }
+    },
+
+    async rotateEventInvite(eventId) {
+      return inTransaction(db, async (tx) => {
+        await getEventForUpdate(tx, eventId)
+        await tx
+          .update(eventInvites)
+          .set({ status: "revoked" })
+          .where(and(eq(eventInvites.eventId, eventId), eq(eventInvites.status, "active")))
+
+        return { invite: await insertActiveInviteWithGeneratedCode(tx, eventId) }
+      })
     }
   }
 }
@@ -763,15 +798,20 @@ async function insertEventWithGeneratedPublicId(
 }
 
 async function insertDefaultInviteWithGeneratedCode(db: DbClient, eventId: string): Promise<void> {
+  await insertActiveInviteWithGeneratedCode(db, eventId)
+}
+
+async function insertActiveInviteWithGeneratedCode(db: DbClient, eventId: string): Promise<DashboardInviteLink> {
   let inviteCodeCollision: unknown
   for (let attempt = 0; attempt < MAX_INVITE_CODE_GENERATION_ATTEMPTS; attempt += 1) {
+    const code = generateEventInviteCode()
     try {
       await db.insert(eventInvites).values({
         eventId,
-        code: generateEventInviteCode(),
+        code,
         status: "active"
       })
-      return
+      return { code, urlPath: `/invite/${code}` }
     } catch (error) {
       if (isPgUniqueViolation(error) && error.constraint === "event_invites_code_unique") {
         inviteCodeCollision = error

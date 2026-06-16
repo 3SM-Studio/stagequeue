@@ -156,6 +156,22 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     return { event }
   })
 
+  app.post("/dashboard/events/:eventId/invite/revoke", async (request) => {
+    const user = await requireActiveCurrentUser(request)
+    const eventId = readParamUuid(request.params, "eventId")
+    await requireEventManageOrSupport(app, user.id, eventId)
+
+    return app.events.revokeEventInvite(eventId)
+  })
+
+  app.post("/dashboard/events/:eventId/invite/rotate", async (request) => {
+    const user = await requireActiveCurrentUser(request)
+    const eventId = readParamUuid(request.params, "eventId")
+    await requireEventManageOrSupport(app, user.id, eventId)
+
+    return app.events.rotateEventInvite(eventId)
+  })
+
   for (const action of lifecycleActions) {
     app.post(`/dashboard/events/:eventId/${action}`, async (request) => {
       const user = await requireActiveCurrentUser(request)
