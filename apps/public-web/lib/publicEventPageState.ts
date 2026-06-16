@@ -44,6 +44,9 @@ function submissionsClosedLabel(reason: string | undefined): string {
   if (reason === "PUBLIC_JOIN_DISABLED") {
     return "Zgloszenia publiczne sa wylaczone"
   }
+  if (reason === "ACCESS_REQUIRED") {
+    return "Zgloszenia wymagaja linku z zaproszeniem"
+  }
 
   return "Zgloszenia sa zamkniete"
 }

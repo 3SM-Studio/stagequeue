@@ -81,6 +81,42 @@ test("valid production config is accepted", () => {
   assert.equal(config.platformSetupToken, validProductionEnv().PLATFORM_SETUP_TOKEN)
 })
 
+test("production config rejects bootstrap platform owner email", () => {
+  assert.throws(
+    () =>
+      parseApiConfig({
+        ...validProductionEnv(),
+        BOOTSTRAP_PLATFORM_OWNER_EMAIL: "owner@example.com"
+      }),
+    (error) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /BOOTSTRAP_PLATFORM_OWNER_EMAIL is development\/test-only/)
+      assert.match(error.message, /PLATFORM_SETUP_TOKEN/)
+      return true
+    }
+  )
+})
+
+test("production config accepts platform setup token without bootstrap email", () => {
+  const config = parseApiConfig({
+    ...validProductionEnv(),
+    BOOTSTRAP_PLATFORM_OWNER_EMAIL: undefined
+  })
+
+  assert.equal(config.nodeEnv, "production")
+  assert.equal(config.bootstrapPlatformOwnerEmail, undefined)
+  assert.equal(config.platformSetupToken, validProductionEnv().PLATFORM_SETUP_TOKEN)
+})
+
+test("test config accepts bootstrap platform owner email", () => {
+  const config = parseApiConfig({
+    NODE_ENV: "test",
+    BOOTSTRAP_PLATFORM_OWNER_EMAIL: "Owner@Example.COM"
+  })
+
+  assert.equal(config.bootstrapPlatformOwnerEmail, "owner@example.com")
+})
+
 test("web config check passes in non-strict mode without deployment env", () => {
   const result = validateWebConfigEnv({})
 

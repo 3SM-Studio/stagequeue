@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -28,6 +29,7 @@ export const venueAccessRoles = ["owner", "manager", "event_creator", "karaoke_o
 export const venueAccessStatuses = ["pending", "active", "revoked", "expired", "rejected"] as const
 export const eventStatuses = ["draft", "scheduled", "active", "paused", "closed", "archived", "cancelled"] as const
 export const eventInviteStatuses = ["active", "revoked"] as const
+export const eventJoinAccessModes = ["open", "invite_required"] as const
 export const eventStaffRoles = ["lead_host", "host", "queue_operator", "viewer"] as const
 export const eventStaffStatuses = ["active", "removed"] as const
 export const songRequestStatuses = ["pending", "approved", "now", "done", "skipped", "rejected"] as const
@@ -63,6 +65,7 @@ export type OrganizationType = (typeof organizationTypes)[number]
 export type OrganizationStatus = (typeof organizationStatuses)[number]
 export type OrganizationMemberRole = (typeof organizationMemberRoles)[number]
 export type EventStatus = (typeof eventStatuses)[number]
+export type EventJoinAccessMode = (typeof eventJoinAccessModes)[number]
 export type SongRequestStatus = (typeof songRequestStatuses)[number]
 export type CatalogImportStatus = (typeof catalogImportStatuses)[number]
 export type PlatformRole = (typeof platformRoles)[number]
@@ -252,6 +255,7 @@ export const events = pgTable(
     endsAt: timestamp("ends_at", { withTimezone: true }),
     publicJoinEnabled: boolean("public_join_enabled").notNull().default(true),
     publicQueueEnabled: boolean("public_queue_enabled").notNull().default(true),
+    joinAccessMode: text("join_access_mode", { enum: eventJoinAccessModes }).notNull().default("open"),
     ...timestamps
   },
   (table) => [
@@ -260,7 +264,8 @@ export const events = pgTable(
     uniqueIndex("events_one_active_or_paused_per_venue_unique")
       .on(table.venueId)
       .where(sql`${table.status} in ('active', 'paused')`),
-    index("events_operated_by_organization_id_idx").on(table.operatedByOrganizationId)
+    index("events_operated_by_organization_id_idx").on(table.operatedByOrganizationId),
+    check("events_join_access_mode_check", sql`${table.joinAccessMode} in ('open', 'invite_required')`)
   ]
 )
 
@@ -279,6 +284,24 @@ export const eventInvites = pgTable(
   (table) => [
     unique("event_invites_code_unique").on(table.code),
     index("event_invites_event_id_idx").on(table.eventId)
+  ]
+)
+
+export const participantEventAccess = pgTable(
+  "participant_event_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    participantTokenHash: text("participant_token_hash").notNull(),
+    grantedByInviteId: uuid("granted_by_invite_id").references(() => eventInvites.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    unique("participant_event_access_event_token_unique").on(table.eventId, table.participantTokenHash),
+    index("participant_event_access_event_id_idx").on(table.eventId),
+    index("participant_event_access_invite_id_idx").on(table.grantedByInviteId)
   ]
 )
 

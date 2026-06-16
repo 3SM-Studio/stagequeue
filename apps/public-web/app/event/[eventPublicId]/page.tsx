@@ -1,8 +1,8 @@
-import Link from "next/link"
+import { headers } from "next/headers"
 import { notFound } from "next/navigation"
+import { PublicEventParticipantView } from "../../../components/PublicEventParticipantView"
 import { ApiErrorPanel } from "../../../components/StatePanels"
 import { getPublicEventPageData } from "../../../lib/pageData"
-import { getPublicEventPageState } from "../../../lib/publicEventPageState"
 
 type PublicEventPageProps = {
   params: Promise<{ eventPublicId: string }>
@@ -10,7 +10,8 @@ type PublicEventPageProps = {
 
 export default async function PublicEventPage({ params }: PublicEventPageProps) {
   const { eventPublicId } = await params
-  const data = await getPublicEventPageData(eventPublicId)
+  const requestHeaders = await headers()
+  const data = await getPublicEventPageData(eventPublicId, requestHeaders.get("cookie"))
 
   if (data.kind === "not-found") {
     notFound()
@@ -20,49 +21,5 @@ export default async function PublicEventPage({ params }: PublicEventPageProps) 
     return <ApiErrorPanel message={data.message} />
   }
 
-  const { detail } = data
-  const state = getPublicEventPageState(detail)
-
-  return (
-    <main className="page-shell">
-      <section className="hero">
-        <div className="panel hero-copy">
-          <p className="eyebrow">{state.venueLabel}</p>
-          <h1>{state.title}</h1>
-          <p className="lead">Sprawdz status wydarzenia karaoke, dostepnosc zgloszen i publiczna kolejke.</p>
-          <div className="actions">
-            {state.showQueueLink ? (
-              <Link className="button secondary" href={`/event/${detail.event.publicId}#queue`}>
-                Zobacz kolejke
-              </Link>
-            ) : null}
-          </div>
-        </div>
-        <div className="panel venue-facts">
-          <div className="fact">
-            <span>Status</span>
-            <strong>{state.statusLabel}</strong>
-          </div>
-          <div className="fact">
-            <span>Zgloszenia</span>
-            <strong>{state.submissionsLabel}</strong>
-          </div>
-          <div className="fact">
-            <span>Kolejka publiczna</span>
-            <strong>{state.queueLabel}</strong>
-          </div>
-          <div className="fact">
-            <span>Organizator</span>
-            <strong>{detail.operatedByOrganization.name}</strong>
-          </div>
-        </div>
-      </section>
-
-      <section id="queue" className="panel state-panel">
-        <p className="eyebrow">Kolejka</p>
-        <h2>{state.queueLabel}</h2>
-        <p className="muted">Szczegoly kolejki sa pokazywane zgodnie z publiczna widocznoscia wydarzenia.</p>
-      </section>
-    </main>
-  )
+  return <PublicEventParticipantView eventPublicId={eventPublicId} initialDetail={data.detail} initialQueue={data.queue} />
 }

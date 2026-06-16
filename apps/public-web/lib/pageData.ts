@@ -1,5 +1,5 @@
-import { PublicApiError, type ActiveEventLookup, type PublicEventDetail, type Venue } from "./apiClient.ts"
-import { getActiveEvent, getServerPublicEventDetail, getVenue } from "./serverApiClient.ts"
+import { PublicApiError, type ActiveEventLookup, type PublicEventDetail, type PublicQueue, type Venue } from "./apiClient.ts"
+import { getActiveEvent, getServerPublicEventDetail, getServerPublicQueue, getVenue } from "./serverApiClient.ts"
 
 export type VenuePageData =
   | {
@@ -19,6 +19,7 @@ export type PublicEventPageData =
   | {
       kind: "ready"
       detail: PublicEventDetail
+      queue: PublicQueue | null
     }
   | {
       kind: "not-found"
@@ -52,11 +53,14 @@ export async function getVenueMetadataData(venueSlug: string): Promise<Venue | n
   }
 }
 
-export async function getPublicEventPageData(eventPublicId: string): Promise<PublicEventPageData> {
+export async function getPublicEventPageData(eventPublicId: string, cookieHeader?: string | null): Promise<PublicEventPageData> {
   try {
+    const detail = await getServerPublicEventDetail(eventPublicId, cookieHeader)
+    const queue = detail.publicQueue.visible ? await getServerPublicQueue(eventPublicId, cookieHeader) : null
     return {
       kind: "ready",
-      detail: await getServerPublicEventDetail(eventPublicId)
+      detail,
+      queue
     }
   } catch (error) {
     if (error instanceof PublicApiError && error.status === 404) {

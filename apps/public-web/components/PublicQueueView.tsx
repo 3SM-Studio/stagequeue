@@ -1,28 +1,53 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { buildPublicVenueStreamUrl, getPublicQueueByVenueSlug, type PublicQueue } from "../lib/apiClient"
+import {
+  buildPublicEventStreamUrl,
+  buildPublicVenueStreamUrl,
+  getPublicQueue,
+  getPublicQueueByVenueSlug,
+  type PublicQueue
+} from "../lib/apiClient"
 import { shouldRefetchQueue } from "../lib/queueRefresh"
 import { createRefetchScheduler } from "../lib/refetchScheduler"
 
-export function PublicQueueView({ initialQueue, venueSlug }: { initialQueue: PublicQueue; venueSlug: string }) {
+type PublicQueueViewProps =
+  | {
+      eventPublicId: string
+      initialQueue: PublicQueue
+      venueSlug?: never
+    }
+  | {
+      eventPublicId?: never
+      initialQueue: PublicQueue
+      venueSlug: string
+    }
+
+export function PublicQueueView(props: PublicQueueViewProps) {
+  const { initialQueue } = props
+  const scopeKind = props.eventPublicId !== undefined ? "event" : "venue"
+  const eventPublicId = props.eventPublicId ?? ""
+  const venueSlug = props.venueSlug ?? ""
   const [queue, setQueue] = useState(initialQueue)
   const [status, setStatus] = useState<"connected" | "connecting" | "stale">("connecting")
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      setQueue(await getPublicQueueByVenueSlug(venueSlug))
+      setQueue(scopeKind === "event" ? await getPublicQueue(eventPublicId) : await getPublicQueueByVenueSlug(venueSlug))
       setError(null)
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Nie udało się odświeżyć kolejki.")
       setStatus("stale")
     }
-  }, [venueSlug])
+  }, [eventPublicId, scopeKind, venueSlug])
 
   useEffect(() => {
     const scheduler = createRefetchScheduler(refresh)
-    const source = new EventSource(buildPublicVenueStreamUrl(venueSlug), { withCredentials: true })
+    const source = new EventSource(
+      scopeKind === "event" ? buildPublicEventStreamUrl(eventPublicId) : buildPublicVenueStreamUrl(venueSlug),
+      { withCredentials: true }
+    )
     source.addEventListener("open", () => setStatus("connected"))
     source.addEventListener("error", () => setStatus("stale"))
 
@@ -55,7 +80,7 @@ export function PublicQueueView({ initialQueue, venueSlug }: { initialQueue: Pub
       scheduler.cancel()
       source.close()
     }
-  }, [venueSlug, refresh])
+  }, [eventPublicId, scopeKind, refresh, venueSlug])
 
   return (
     <section className="queue-layout">

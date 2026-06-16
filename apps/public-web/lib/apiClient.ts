@@ -22,10 +22,7 @@ export type Venue = {
 }
 
 export type PublicEvent = {
-  id: string
   publicId: string
-  venueId: string
-  operatedByOrganizationId: string
   name: string
   slug: string
   status: "active" | "paused" | "draft" | "scheduled" | "closed" | "archived" | "cancelled" | string
@@ -33,6 +30,7 @@ export type PublicEvent = {
   endsAt: string | null
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  joinAccessMode: "open" | "invite_required"
 }
 
 export type ActiveEventLookup = {
@@ -48,7 +46,6 @@ export type ActiveEventLookup = {
 
 export type PublicEventDetail = {
   event: {
-    id: string
     publicId: string
     name: string
     slug: string
@@ -57,16 +54,15 @@ export type PublicEventDetail = {
     endsAt: string | null
     publicJoinEnabled: boolean
     publicQueueEnabled: boolean
+    joinAccessMode: PublicEvent["joinAccessMode"]
   }
   venue: {
-    id: string
     slug: string
     name: string
     city: string | null
     timezone: string
   }
   operatedByOrganization: {
-    id: string
     slug: string
     name: string
   }
@@ -90,7 +86,7 @@ export type QueueItem = {
 
 export type PublicQueue = {
   event: {
-    id: string
+    publicId: string
     name: string
     status: string
   } | null
@@ -188,8 +184,8 @@ export function buildPublicApiUrl(path: string, params: Record<string, string | 
 
 export const getPublicApiBaseUrl = getBrowserApiBaseUrl
 
-export function buildPublicEventStreamUrl(eventId: string): string {
-  return buildPublicApiUrl(`/public/events/${encodeURIComponent(eventId)}/stream`)
+export function buildPublicEventStreamUrl(eventPublicId: string): string {
+  return buildPublicApiUrl(`/public/events/${encodeURIComponent(eventPublicId)}/stream`)
 }
 
 export function buildPublicVenueStreamUrl(venueSlug: string): string {
@@ -206,8 +202,8 @@ export async function getActiveEvent(venueSlug: string): Promise<ActiveEventLook
   return assertActiveEventResponse(await fetchJson(`/public/venues/${encodeURIComponent(venueSlug)}/active-event`))
 }
 
-export async function getPublicQueue(eventId: string): Promise<PublicQueue> {
-  return assertPublicQueueResponse(await fetchJson(`/public/events/${encodeURIComponent(eventId)}/queue`))
+export async function getPublicQueue(eventPublicId: string): Promise<PublicQueue> {
+  return assertPublicQueueResponse(await fetchJson(`/public/events/${encodeURIComponent(eventPublicId)}/queue`))
 }
 
 export async function getPublicEventDetail(eventPublicId: string): Promise<PublicEventDetail> {
@@ -232,9 +228,13 @@ export async function getMyRequestsByVenueSlug(venueSlug: string): Promise<Publi
   return assertMyRequestsResponse(await fetchJson(`/public/venues/${encodeURIComponent(venueSlug)}/my-requests`))
 }
 
-export async function submitSongRequest(eventId: string, input: SubmitSongRequestInput): Promise<SubmitSongRequestResult> {
+export async function getMyRequestsByEventPublicId(eventPublicId: string): Promise<PublicMyRequestsResponse> {
+  return assertMyRequestsResponse(await fetchJson(`/public/events/${encodeURIComponent(eventPublicId)}/my-requests`))
+}
+
+export async function submitSongRequest(eventPublicId: string, input: SubmitSongRequestInput): Promise<SubmitSongRequestResult> {
   return assertSubmitRequestResponse(
-    await fetchJson(`/public/events/${encodeURIComponent(eventId)}/requests`, {
+    await fetchJson(`/public/events/${encodeURIComponent(eventPublicId)}/requests`, {
       method: "POST",
       body: JSON.stringify(input),
       headers: {

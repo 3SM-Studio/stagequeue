@@ -1,6 +1,7 @@
 import {
   events,
   organizations,
+  participantEventAccess,
   queueEvents,
   songRequests,
   songSources,
@@ -37,7 +38,7 @@ export type QueueSongRequest = {
 
 export type PublicQueueResponse = {
   event: {
-    id: string
+    publicId: string
     name: string
     status: string
   } | null
@@ -52,6 +53,7 @@ export type PublicQueueResponse = {
     endsAt: Date | null
     publicJoinEnabled: boolean
     publicQueueEnabled: boolean
+    joinAccessMode: string
   } | null
   venue: {
     id: string
@@ -211,6 +213,12 @@ export function createQueueService(db: DbClient, eventBus?: DomainEventBus, anti
         if (context.event.status !== "active" || !context.event.publicJoinEnabled) {
           throw new ApiHttpError(409, "CONFLICT", "Event is not accepting public song requests")
         }
+        if (
+          context.event.joinAccessMode === "invite_required" &&
+          !(await hasParticipantEventAccess(tx, eventId, input.participantTokenHash))
+        ) {
+          throw new ApiHttpError(403, "ACCESS_REQUIRED", "Invite access is required to submit to this event")
+        }
 
         await requireActiveSongSource(tx, input.sourceId)
         await enforceParticipantAntiSpam(tx, eventId, input.participantTokenHash, config)
@@ -253,7 +261,7 @@ export function createQueueService(db: DbClient, eventBus?: DomainEventBus, anti
         .orderBy(asc(songRequests.position), desc(songRequests.requestedAt))
 
       return {
-        event: publicEvent(context),
+        event: operatorEvent(context),
         venue: publicVenue(context),
         pending: rows.filter((request) => request.status === "pending").map(toOperatorItem),
         approved: rows.filter((request) => request.status === "approved").sort(compareQueuePosition).map(toOperatorItem),
@@ -480,14 +488,16 @@ function publishRequestChange(eventBus: DomainEventBus | undefined, request: Que
 async function getEventContext(db: DbClient, eventId: string) {
   const rows = await db
     .select({
-      event: {
-        id: events.id,
-        venueId: events.venueId,
+            event: {
+              id: events.id,
+              publicId: events.publicId,
+              venueId: events.venueId,
         operatedByOrganizationId: events.operatedByOrganizationId,
         name: events.name,
         status: events.status,
         publicJoinEnabled: events.publicJoinEnabled,
-        publicQueueEnabled: events.publicQueueEnabled
+        publicQueueEnabled: events.publicQueueEnabled,
+        joinAccessMode: events.joinAccessMode
       },
       venue: {
         id: venues.id,
@@ -513,6 +523,25 @@ async function getEventContext(db: DbClient, eventId: string) {
   }
 
   return context
+}
+
+async function hasParticipantEventAccess(
+  db: DbClient,
+  eventId: string,
+  participantTokenHash: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: participantEventAccess.id })
+    .from(participantEventAccess)
+    .where(
+      and(
+        eq(participantEventAccess.eventId, eventId),
+        eq(participantEventAccess.participantTokenHash, participantTokenHash)
+      )
+    )
+    .limit(1)
+
+  return rows.length > 0
 }
 
 async function getPublicEventContext(db: DbClient, eventId: string): Promise<Awaited<ReturnType<typeof getEventContext>>> {
@@ -719,6 +748,14 @@ function hasTransaction(db: DbClient): db is TransactionCapableDb {
 }
 
 function publicEvent(context: Awaited<ReturnType<typeof getEventContext>>) {
+  return {
+    publicId: context.event.publicId,
+    name: context.event.name,
+    status: context.event.status
+  }
+}
+
+function operatorEvent(context: Awaited<ReturnType<typeof getEventContext>>) {
   return {
     id: context.event.id,
     name: context.event.name,

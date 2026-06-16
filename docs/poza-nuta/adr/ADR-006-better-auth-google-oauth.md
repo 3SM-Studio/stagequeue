@@ -21,3 +21,7 @@ Negative: auth setup requires careful cookie, CORS, redirect, and bootstrap-owne
 ## Notes for implementation
 
 Do not build custom auth. Do not use Supabase Auth, Clerk, Auth0, or NextAuth as the initial authority. Add `BOOTSTRAP_PLATFORM_OWNER_EMAIL` for first-owner provisioning.
+
+### 2026-06 update
+
+`BOOTSTRAP_PLATFORM_OWNER_EMAIL` is development/test-only. In production, first-owner provisioning must use `PLATFORM_SETUP_TOKEN`; setting `BOOTSTRAP_PLATFORM_OWNER_EMAIL` with `NODE_ENV=production` is rejected by API config validation.

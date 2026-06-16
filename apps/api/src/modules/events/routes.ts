@@ -21,7 +21,7 @@ import {
 } from "../http/validation.ts"
 import { allowedEventStaffRoles } from "./service.ts"
 import type { CreateEventInput, PatchEventInput, PatchEventStaffInput } from "./service.ts"
-import { resolveParticipantToken } from "../queue/participant.ts"
+import { PARTICIPANT_COOKIE_NAME, hashParticipantToken, isValidParticipantToken, resolveParticipantToken } from "../queue/participant.ts"
 
 const lifecycleActions = ["start", "pause", "resume", "close", "archive", "cancel"] as const
 
@@ -64,6 +64,7 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     const endsAt = readOptionalDateString(body, "endsAt")
     const publicJoinEnabled = readOptionalBoolean(body, "publicJoinEnabled")
     const publicQueueEnabled = readOptionalBoolean(body, "publicQueueEnabled")
+    const joinAccessMode = readOptionalEnum(body, "joinAccessMode", ["open", "invite_required"])
     if (startsAt !== undefined) {
       createInput.startsAt = startsAt
     }
@@ -75,6 +76,9 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     }
     if (publicQueueEnabled !== undefined) {
       createInput.publicQueueEnabled = publicQueueEnabled
+    }
+    if (joinAccessMode !== undefined) {
+      createInput.joinAccessMode = joinAccessMode
     }
 
     const created = await app.events.createEvent(createInput)
@@ -124,6 +128,7 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     const endsAt = readOptionalDateString(body, "endsAt")
     const publicJoinEnabled = readOptionalBoolean(body, "publicJoinEnabled")
     const publicQueueEnabled = readOptionalBoolean(body, "publicQueueEnabled")
+    const joinAccessMode = readOptionalEnum(body, "joinAccessMode", ["open", "invite_required"])
     if (name !== undefined) {
       patchInput.name = name
     }
@@ -141,6 +146,9 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     }
     if (publicQueueEnabled !== undefined) {
       patchInput.publicQueueEnabled = publicQueueEnabled
+    }
+    if (joinAccessMode !== undefined) {
+      patchInput.joinAccessMode = joinAccessMode
     }
 
     const event = await app.events.patchEvent(eventId, patchInput)
@@ -233,14 +241,19 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
 export async function registerEventPublicRoutes(app: FastifyInstance): Promise<void> {
   app.post("/public/invites/:inviteCode/claim", async (request, reply) => {
     const inviteCode = readParamPublicId(request.params, "inviteCode")
-    resolveParticipantToken(request, reply)
+    const participantToken = resolveParticipantToken(request, reply)
+    const participantTokenHash = hashParticipantToken(participantToken, request.server.config.participantTokenSecret)
 
-    return app.events.claimPublicInvite(inviteCode)
+    return app.events.claimPublicInvite(inviteCode, participantTokenHash)
   })
 
   app.get("/public/events/:eventPublicId", async (request) => {
     const eventPublicId = readParamPublicId(request.params, "eventPublicId")
-    const detail = await app.events.getPublicEventById(eventPublicId)
+    const participantToken = request.cookies[PARTICIPANT_COOKIE_NAME]
+    const participantTokenHash = isValidParticipantToken(participantToken)
+      ? hashParticipantToken(participantToken, request.server.config.participantTokenSecret)
+      : undefined
+    const detail = await app.events.getPublicEventById(eventPublicId, participantTokenHash)
     if (!detail) {
       throw new ApiHttpError(404, "NOT_FOUND", "Missing event")
     }

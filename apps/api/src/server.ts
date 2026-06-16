@@ -10,6 +10,7 @@ import type { LocalSong } from "../../../src/importers/ising/types.ts";
 import type { QueueState, SongRequest } from "../../../src/queue/types.ts";
 
 export type ApiConfig = {
+  nodeEnv: ApiRuntimeEnv;
   host: string;
   port: number;
   adminToken?: string;
@@ -20,6 +21,7 @@ export type ApiConfig = {
   logger: ApiLogger;
 };
 
+type ApiRuntimeEnv = "development" | "test" | "production";
 type ApiErrorCode = "bad_request" | "unauthorized" | "not_found" | "conflict" | "missing_song_index" | "internal_error";
 export type ApiLogLevel = "silent" | "info" | "debug";
 
@@ -49,6 +51,7 @@ class ApiError extends Error {
 }
 
 const DEFAULT_CONFIG: ApiConfig = {
+  nodeEnv: "development",
   host: "127.0.0.1",
   port: 4321,
   eventsDir: "data/events",
@@ -65,6 +68,7 @@ export function createApiServer(config: Partial<ApiConfig> = {}): Server {
     ...DEFAULT_CONFIG,
     ...config
   };
+  validateApiConfig(resolvedConfig);
 
   return createServer(async (request, response) => {
     const context = createRequestContext(request, resolvedConfig);
@@ -83,10 +87,11 @@ export function createApiServer(config: Partial<ApiConfig> = {}): Server {
   });
 }
 
-export async function loadApiConfig(envPath = ".env"): Promise<ApiConfig> {
-  const env = { ...(await readEnvFile(envPath)), ...process.env };
+export async function loadApiConfig(envPath = ".env", envOverrides: NodeJS.ProcessEnv = process.env): Promise<ApiConfig> {
+  const env = { ...(await readEnvFile(envPath)), ...envOverrides };
 
   const config: ApiConfig = {
+    nodeEnv: parseNodeEnv(env.NODE_ENV),
     host: env.API_HOST || DEFAULT_CONFIG.host,
     port: parsePort(env.API_PORT, DEFAULT_CONFIG.port),
     eventsDir: DEFAULT_CONFIG.eventsDir,
@@ -102,7 +107,15 @@ export async function loadApiConfig(envPath = ".env"): Promise<ApiConfig> {
     config.allowedOrigins = DEFAULT_CONFIG.allowedOrigins;
   }
 
+  validateApiConfig(config);
+
   return config;
+}
+
+function validateApiConfig(config: ApiConfig): void {
+  if (config.nodeEnv === "production" && !config.adminToken) {
+    throw new Error("Invalid production legacy API configuration: API_ADMIN_TOKEN is required in production");
+  }
 }
 
 async function routeRequest(request: IncomingMessage, response: ServerResponse, config: ApiConfig): Promise<void> {
@@ -307,6 +320,9 @@ async function loadEvent(config: ApiConfig, eventId: string): Promise<QueueState
 
 function requireAdmin(request: IncomingMessage, config: ApiConfig): void {
   if (!config.adminToken) {
+    if (config.nodeEnv === "production") {
+      throw new ApiError(401, "unauthorized", "Missing or invalid admin token");
+    }
     return;
   }
 
@@ -528,6 +544,14 @@ function parseLogLevel(value: string | undefined): ApiLogLevel {
   }
 
   return DEFAULT_CONFIG.logLevel;
+}
+
+function parseNodeEnv(value: string | undefined): ApiRuntimeEnv {
+  if (value === "production" || value === "test") {
+    return value;
+  }
+
+  return "development";
 }
 
 function optionalText(value: string | undefined): string | undefined {

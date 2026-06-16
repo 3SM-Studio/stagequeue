@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createApiServer, type ApiConfig } from "../apps/api/src/server.ts";
+import { createApiServer, loadApiConfig, type ApiConfig } from "../apps/api/src/server.ts";
 import { loadQueueState } from "../src/queue/localQueueStore.ts";
 import type { LocalSong } from "../src/importers/ising/types.ts";
 
@@ -367,6 +367,46 @@ test("admin token is required when API_ADMIN_TOKEN is configured", async () => {
   }
 });
 
+test("production legacy API start fails without API_ADMIN_TOKEN", () => {
+  assert.throws(
+    () => createApiServer({ nodeEnv: "production" }),
+    /API_ADMIN_TOKEN is required in production/
+  );
+});
+
+test("production legacy config fails without API_ADMIN_TOKEN", async () => {
+  await assert.rejects(
+    () => loadApiConfig("missing-production-legacy.env", { NODE_ENV: "production" }),
+    /API_ADMIN_TOKEN is required in production/
+  );
+});
+
+test("production legacy API requires bearer admin token", async () => {
+  const api = await startTestApi({ nodeEnv: "production", adminToken: "secret-token" });
+  try {
+    const unauthorized = await api.request("POST", "/api/events", { id: "test-event", name: "Poza Nutą Test" });
+    const authorized = await api.request("POST", "/api/events", { id: "test-event", name: "Poza Nutą Test" }, "secret-token");
+
+    assert.equal(unauthorized.status, 401);
+    assert.equal(unauthorized.body.error, "unauthorized");
+    assert.equal(authorized.status, 201);
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
+test("production legacy API rejects wrong bearer admin token", async () => {
+  const api = await startTestApi({ nodeEnv: "production", adminToken: "secret-token" });
+  try {
+    const response = await api.request("POST", "/api/events", { id: "test-event", name: "Poza Nutą Test" }, "wrong-token");
+
+    assert.equal(response.status, 401);
+    assert.equal(response.body.error, "unauthorized");
+  } finally {
+    await cleanupApi(api);
+  }
+});
+
 test("admin token is not required when API_ADMIN_TOKEN is unset", async () => {
   const api = await startTestApi();
   try {
@@ -429,13 +469,14 @@ async function createEventAndPendingRequest(api: TestApi): Promise<string> {
   return requestResponse.body.request.id;
 }
 
-async function startTestApi(options: { writeSongIndex?: boolean; songs?: LocalSong[]; adminToken?: string; logLevel?: ApiConfig["logLevel"] } = {}): Promise<TestApi> {
+async function startTestApi(options: { writeSongIndex?: boolean; songs?: LocalSong[]; adminToken?: string; logLevel?: ApiConfig["logLevel"]; nodeEnv?: ApiConfig["nodeEnv"] } = {}): Promise<TestApi> {
   const tempDir = await mkdtemp(join(tmpdir(), "api-test-"));
   const eventsDir = join(tempDir, "events");
   const songIndexPath = join(tempDir, "ising-songs.json");
   const logs: string[] = [];
   const errors: string[] = [];
   const config: ApiConfig = {
+    nodeEnv: options.nodeEnv ?? "test",
     host: "127.0.0.1",
     port: 0,
     eventsDir,

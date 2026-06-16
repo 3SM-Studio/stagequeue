@@ -19,6 +19,7 @@ const USER_ID = "11111111-1111-4111-8111-111111111111"
 const VENUE_ID = "22222222-2222-4222-8222-222222222222"
 const ORG_ID = "33333333-3333-4333-8333-333333333333"
 const EVENT_ID = "44444444-4444-4444-8444-444444444444"
+const EVENT_PUBLIC_ID = "sseEvent1"
 const REQUEST_ID = "55555555-5555-4555-8555-555555555555"
 const IMPORT_RUN_ID = "66666666-6666-4666-8666-666666666666"
 
@@ -28,7 +29,7 @@ test("public stream endpoint returns text/event-stream and cleans up subscriber 
   const port = (app.server.address() as AddressInfo).port
   const controller = new AbortController()
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/public/events/${EVENT_ID}/stream`, {
+    const response = await fetch(`http://127.0.0.1:${port}/public/events/${EVENT_PUBLIC_ID}/stream`, {
       headers: {
         Origin: "http://localhost:3000"
       },
@@ -135,7 +136,7 @@ test("public stream is forbidden when publicQueueEnabled is false", async () => 
     }
   })
   try {
-    const response = await app.inject({ method: "GET", url: `/public/events/${EVENT_ID}/stream` })
+    const response = await app.inject({ method: "GET", url: `/public/events/${EVENT_PUBLIC_ID}/stream` })
 
     assert.equal(response.statusCode, 403)
     assert.equal(response.json().error.code, "FORBIDDEN")
@@ -152,7 +153,7 @@ test("public stream is hidden for archived and cancelled events", async () => {
       event: makeEvent(status)
     })
     try {
-      const response = await app.inject({ method: "GET", url: `/public/events/${EVENT_ID}/stream` })
+      const response = await app.inject({ method: "GET", url: `/public/events/${EVENT_PUBLIC_ID}/stream` })
 
       assert.equal(response.statusCode, 409)
       assert.equal(response.json().error.code, "CONFLICT")
@@ -175,7 +176,7 @@ test("event-id public stream hides events from non-public venues and organizatio
   ]) {
     const app = await createTestApp({ publicContext })
     try {
-      const response = await app.inject({ method: "GET", url: `/public/events/${EVENT_ID}/stream` })
+      const response = await app.inject({ method: "GET", url: `/public/events/${EVENT_PUBLIC_ID}/stream` })
 
       assert.equal(response.statusCode, 404)
       assert.equal(response.json().error.code, "NOT_FOUND")
@@ -465,7 +466,8 @@ function eventContext() {
       name: "SSE Event",
       status: "active",
       publicJoinEnabled: true,
-      publicQueueEnabled: true
+      publicQueueEnabled: true,
+      joinAccessMode: "open"
     },
     venue: {
       id: VENUE_ID,
@@ -520,7 +522,8 @@ function makeEvent(status: string): EventSummary {
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
-    publicQueueEnabled: true
+    publicQueueEnabled: true,
+    joinAccessMode: "open"
   }
 }
 
@@ -559,6 +562,18 @@ function requireAllowed(allowed: boolean | undefined): void {
 function fakeEventsService(event: EventSummary | null = makeEvent("active")): ApiModuleServices["events"] {
   return {
     getById: async () => event,
+    resolvePublicEventByPublicId: async (eventPublicId: string) =>
+      event && event.publicId === eventPublicId
+        ? {
+            id: event.id,
+            publicId: event.publicId,
+            venueId: event.venueId,
+            status: event.status,
+            publicJoinEnabled: event.publicJoinEnabled,
+            publicQueueEnabled: event.publicQueueEnabled,
+            joinAccessMode: event.joinAccessMode
+          }
+        : null,
     getPublicActiveEventByVenueSlug: async (venueSlug: string) =>
       venueSlug === "klub-x"
         ? {
@@ -600,12 +615,14 @@ function fakeDbResources(
             {
               event: {
                 id: event.id,
+                publicId: event.publicId,
                 venueId: event.venueId,
                 operatedByOrganizationId: event.operatedByOrganizationId,
                 name: event.name,
                 status: event.status,
                 publicJoinEnabled: event.publicJoinEnabled,
-                publicQueueEnabled: event.publicQueueEnabled
+                publicQueueEnabled: event.publicQueueEnabled,
+                joinAccessMode: event.joinAccessMode
               },
               venue: {
                 id: VENUE_ID,

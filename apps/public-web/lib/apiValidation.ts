@@ -38,7 +38,7 @@ export function assertPublicEventDetailResponse(value: unknown): PublicEventDeta
   if (
     !isRecord(value) ||
     !isPublicEventDetailEvent(value.event) ||
-    !isActiveEventVenue(value.venue) ||
+    !isPublicEventDetailVenue(value.venue) ||
     !isPublicEventOrganization(value.operatedByOrganization) ||
     !isPublicQueueSubmissions(value.submissions) ||
     !isPublicEventQueueState(value.publicQueue)
@@ -147,24 +147,21 @@ function isActiveEventVenue(value: unknown): value is ActiveEventLookup["venue"]
 function isPublicEvent(value: unknown): value is PublicEvent {
   return (
     isRecord(value) &&
-    isString(value.id) &&
     isString(value.publicId) &&
-    isString(value.venueId) &&
-    isString(value.operatedByOrganizationId) &&
     isString(value.name) &&
     isString(value.slug) &&
     isEventStatus(value.status) &&
     isNullableString(value.startsAt) &&
     isNullableString(value.endsAt) &&
     typeof value.publicJoinEnabled === "boolean" &&
-    typeof value.publicQueueEnabled === "boolean"
+    typeof value.publicQueueEnabled === "boolean" &&
+    isJoinAccessMode(value.joinAccessMode)
   )
 }
 
 function isPublicEventDetailEvent(value: unknown): value is PublicEventDetail["event"] {
   return (
     isRecord(value) &&
-    isString(value.id) &&
     isString(value.publicId) &&
     isString(value.name) &&
     isString(value.slug) &&
@@ -172,12 +169,23 @@ function isPublicEventDetailEvent(value: unknown): value is PublicEventDetail["e
     isNullableString(value.startsAt) &&
     isNullableString(value.endsAt) &&
     typeof value.publicJoinEnabled === "boolean" &&
-    typeof value.publicQueueEnabled === "boolean"
+    typeof value.publicQueueEnabled === "boolean" &&
+    isJoinAccessMode(value.joinAccessMode)
+  )
+}
+
+function isPublicEventDetailVenue(value: unknown): value is PublicEventDetail["venue"] {
+  return (
+    isRecord(value) &&
+    isString(value.slug) &&
+    isString(value.name) &&
+    isNullableString(value.city) &&
+    isString(value.timezone)
   )
 }
 
 function isPublicEventOrganization(value: unknown): value is PublicEventDetail["operatedByOrganization"] {
-  return isRecord(value) && isString(value.id) && isString(value.slug) && isString(value.name)
+  return isRecord(value) && isString(value.slug) && isString(value.name)
 }
 
 function isPublicEventQueueState(value: unknown): value is PublicEventDetail["publicQueue"] {
@@ -196,7 +204,7 @@ function isQueueItem(value: unknown): value is QueueItem {
 }
 
 function isPublicQueueEvent(value: unknown): value is PublicQueue["event"] {
-  return isRecord(value) && isString(value.id) && isString(value.name) && isEventStatus(value.status)
+  return isRecord(value) && isString(value.publicId) && isString(value.name) && isEventStatus(value.status)
 }
 
 function isPublicQueueVenue(value: unknown): value is PublicQueue["venue"] {
@@ -242,6 +250,10 @@ function isEventStatus(value: unknown): value is PublicEvent["status"] {
 
 function isRequestStatus(value: unknown): value is PublicMyRequest["status"] {
   return isString(value) && ["pending", "approved", "now", "done", "rejected", "skipped"].includes(value)
+}
+
+function isJoinAccessMode(value: unknown): value is PublicEvent["joinAccessMode"] {
+  return isString(value) && ["open", "invite_required"].includes(value)
 }
 
 function isNullableString(value: unknown): value is string | null {
