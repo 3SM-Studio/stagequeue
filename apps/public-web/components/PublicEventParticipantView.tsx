@@ -105,6 +105,11 @@ export function PublicEventParticipantView({
             <h2>Zglos piosenke</h2>
             <JoinForm eventPublicId={eventPublicId} />
           </>
+        ) : detail.submissions.reason === "ACCESS_REQUIRED" ? (
+          <>
+            <h2>Wymagane zaproszenie</h2>
+            <p>Ten event przyjmuje zgloszenia tylko po wejsciu przez aktywny link zaproszenia.</p>
+          </>
         ) : (
           <>
             <h2>Zgloszenia sa zamkniete</h2>

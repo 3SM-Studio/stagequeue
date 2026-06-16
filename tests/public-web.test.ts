@@ -32,7 +32,7 @@ import {
   PUBLIC_MY_REQUESTS_REFRESH_INTERVAL_MS,
   shouldPollMyRequests
 } from "../apps/public-web/lib/myRequestsState.ts"
-import { getVenueMetadataData, getVenuePageData } from "../apps/public-web/lib/pageData.ts"
+import { getPublicEventPageData, getVenueMetadataData, getVenuePageData } from "../apps/public-web/lib/pageData.ts"
 import { getPublicEventPageState } from "../apps/public-web/lib/publicEventPageState.ts"
 import { shouldRefetchQueue } from "../apps/public-web/lib/queueRefresh.ts"
 import { createRefetchScheduler as createPublicRefetchScheduler } from "../apps/public-web/lib/refetchScheduler.ts"
@@ -206,6 +206,32 @@ test("public-web venue loader handles inactive state", async () => {
   }
 })
 
+test("public-web event page loader forwards participant cookie to event detail", async () => {
+  const previousFetch = globalThis.fetch
+  let eventDetailCookie: string | undefined
+  globalThis.fetch = async (input, init) => {
+    const url = String(input)
+    const headers = init?.headers as Record<string, string> | undefined
+    if (url.endsWith("/public/events/ka2Md-d1das")) {
+      eventDetailCookie = headers?.cookie
+      return jsonResponse(validPublicEventDetailResponse())
+    }
+    if (url.endsWith("/public/events/ka2Md-d1das/queue")) {
+      return jsonResponse(validPublicQueueResponse())
+    }
+    return jsonResponse({ error: { code: "NOT_FOUND", message: "Missing" } }, 404)
+  }
+
+  try {
+    const data = await getPublicEventPageData("ka2Md-d1das", "pn_participant=participant-token")
+
+    assert.equal(data.kind, "ready")
+    assert.equal(eventDetailCookie, "pn_participant=participant-token")
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
 test("public-web reserved static slugs do not call the public venue API", async () => {
   const previousFetch = globalThis.fetch
   const reservedSlugs = ["sw.js", "favicon.ico", "robots.txt", "sitemap.xml", "manifest.webmanifest", "_next", "assets"]
@@ -317,6 +343,41 @@ test("public-web event-first join flow submits by publicId", async () => {
     assert.equal(result.request.status, "pending")
     assert.equal(requestedUrl.endsWith("/public/events/ka2Md-d1das/requests"), true)
     assert.equal(requestedCredentials, "include")
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
+test("public-web invite claim redirects to event page before event-first submit", async () => {
+  const previousFetch = globalThis.fetch
+  const requestedUrls: string[] = []
+  const requestedCredentials: Array<RequestCredentials | undefined> = []
+  globalThis.fetch = async (input, init) => {
+    requestedUrls.push(String(input))
+    requestedCredentials.push(init?.credentials)
+    if (String(input).endsWith("/public/invites/inviteCode1/claim")) {
+      return jsonResponse(validInviteClaimResponse())
+    }
+    return jsonResponse(validSubmitResponse(), 201)
+  }
+
+  try {
+    const claim = await claimPublicInvite("inviteCode1")
+    const submit = await submitSongRequest(claim.eventPublicId, {
+      singerName: "Michal",
+      sourceId: "ising",
+      sourceTrackId: "9053",
+      songTitle: "Krolowa Lez",
+      songArtist: "Agnieszka Chylinska",
+      songUrl: "",
+      note: ""
+    })
+
+    assert.equal(claim.redirectTo, "/event/ka2Md-d1das")
+    assert.equal(submit.request.status, "pending")
+    assert.equal(requestedUrls[0]?.endsWith("/public/invites/inviteCode1/claim"), true)
+    assert.equal(requestedUrls[1]?.endsWith("/public/events/ka2Md-d1das/requests"), true)
+    assert.deepEqual(requestedCredentials, ["include", "include"])
   } finally {
     globalThis.fetch = previousFetch
   }
@@ -513,7 +574,8 @@ test("public-web join page policy closes the form when publicJoinEnabled is fals
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: false,
-    publicQueueEnabled: true
+    publicQueueEnabled: true,
+    joinAccessMode: "open"
   })
 
   assert.equal(visibility.kind, "closed")
@@ -530,6 +592,39 @@ test("public-web event-first page maps detail response to view state", () => {
   assert.equal(state.showQueueLink, true)
 })
 
+test("public-web invite-required event without access maps to access required state", () => {
+  const state = getPublicEventPageState({
+    ...validPublicEventDetailResponse(),
+    event: {
+      ...validPublicEventDetailResponse().event,
+      joinAccessMode: "invite_required"
+    },
+    submissions: {
+      enabled: false,
+      reason: "ACCESS_REQUIRED"
+    }
+  })
+
+  assert.equal(state.submissionsLabel, "Zgloszenia wymagaja linku z zaproszeniem")
+})
+
+test("public-web join disabled stays disabled even for invite-required event", () => {
+  const state = getPublicEventPageState({
+    ...validPublicEventDetailResponse(),
+    event: {
+      ...validPublicEventDetailResponse().event,
+      publicJoinEnabled: false,
+      joinAccessMode: "invite_required"
+    },
+    submissions: {
+      enabled: false,
+      reason: "PUBLIC_JOIN_DISABLED"
+    }
+  })
+
+  assert.equal(state.submissionsLabel, "Zgloszenia publiczne sa wylaczone")
+})
+
 test("public-web join page policy does not open the form for paused events", () => {
   const visibility = getJoinVisibility({
     publicId: "ka2Md-d1das",
@@ -539,7 +634,8 @@ test("public-web join page policy does not open the form for paused events", () 
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
-    publicQueueEnabled: true
+    publicQueueEnabled: true,
+    joinAccessMode: "open"
   })
 
   assert.equal(visibility.kind, "paused")
@@ -722,7 +818,8 @@ function validActiveEventResponse() {
       startsAt: null,
       endsAt: null,
       publicJoinEnabled: true,
-      publicQueueEnabled: true
+      publicQueueEnabled: true,
+      joinAccessMode: "open" as const
     }
   }
 }
@@ -737,7 +834,8 @@ function validPublicEventDetailResponse(): PublicEventDetail {
       startsAt: null,
       endsAt: null,
       publicJoinEnabled: true,
-      publicQueueEnabled: true
+      publicQueueEnabled: true,
+      joinAccessMode: "open"
     },
     venue: {
       slug: "klub-x",

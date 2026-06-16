@@ -1,5 +1,6 @@
 import {
   eventStaffAssignments,
+  participantEventAccess,
   eventStaffRoles,
   eventStatuses,
   eventInvites,
@@ -10,6 +11,7 @@ import {
   venueOrganizationAccess,
   venues,
   type DbClient,
+  type EventJoinAccessMode,
   type EventStatus
 } from "@poza-nuta/db"
 import { randomBytes } from "node:crypto"
@@ -38,6 +40,7 @@ export type EventSummary = {
   endsAt: Date | null
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  joinAccessMode: EventJoinAccessMode
 }
 
 export type DashboardEventSummary = EventSummary & {
@@ -87,6 +90,7 @@ export type PublicEventDetail = {
     endsAt: Date | null
     publicJoinEnabled: boolean
     publicQueueEnabled: boolean
+    joinAccessMode: EventJoinAccessMode
   }
   venue: {
     slug: string
@@ -115,6 +119,7 @@ export type PublicEventResolution = {
   status: string
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  joinAccessMode: EventJoinAccessMode
 }
 
 export type PublicInviteClaim = {
@@ -133,6 +138,7 @@ export type CreateEventInput = {
   endsAt?: string
   publicJoinEnabled?: boolean
   publicQueueEnabled?: boolean
+  joinAccessMode?: EventJoinAccessMode
 }
 
 export type PatchEventInput = {
@@ -142,6 +148,7 @@ export type PatchEventInput = {
   endsAt?: string
   publicJoinEnabled?: boolean
   publicQueueEnabled?: boolean
+  joinAccessMode?: EventJoinAccessMode
 }
 
 export type AssignEventStaffInput = {
@@ -177,8 +184,8 @@ export type EventsService = {
   userIsActiveOrganizationMember(userId: string, organizationId: string): Promise<boolean>
   getPublicActiveEventByVenueSlug(venueSlug: string): Promise<PublicActiveEventLookup | null>
   resolvePublicEventByPublicId(eventPublicId: string): Promise<PublicEventResolution | null>
-  getPublicEventById(eventPublicId: string): Promise<PublicEventDetail | null>
-  claimPublicInvite(inviteCode: string): Promise<PublicInviteClaim>
+  getPublicEventById(eventPublicId: string, participantTokenHash?: string): Promise<PublicEventDetail | null>
+  claimPublicInvite(inviteCode: string, participantTokenHash: string): Promise<PublicInviteClaim>
 }
 
 const lifecycleTransitions = {
@@ -283,7 +290,8 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
           endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
           publicJoinEnabled: input.publicJoinEnabled ?? false,
-          publicQueueEnabled: input.publicQueueEnabled ?? false
+          publicQueueEnabled: input.publicQueueEnabled ?? false,
+          joinAccessMode: input.joinAccessMode ?? "open"
         })
         if (inserted[0]) {
           await insertDefaultInviteWithGeneratedCode(tx, inserted[0].id)
@@ -326,6 +334,9 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
       }
       if (input.publicQueueEnabled !== undefined) {
         update.publicQueueEnabled = input.publicQueueEnabled
+      }
+      if (input.joinAccessMode !== undefined) {
+        update.joinAccessMode = input.joinAccessMode
       }
 
       if (Object.keys(update).length === 0) {
@@ -565,11 +576,12 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         venueId: row.event.venueId,
         status: row.event.status,
         publicJoinEnabled: row.event.publicJoinEnabled,
-        publicQueueEnabled: row.event.publicQueueEnabled
+        publicQueueEnabled: row.event.publicQueueEnabled,
+        joinAccessMode: row.event.joinAccessMode
       }
     },
 
-    async getPublicEventById(eventPublicId) {
+    async getPublicEventById(eventPublicId, participantTokenHash) {
       const rows = await db
         .select(publicEventDetailSelection)
         .from(events)
@@ -588,6 +600,10 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
       })
       assertPublicEventDetailVisible(row.event)
 
+      const hasParticipantAccess =
+        row.event.joinAccessMode === "open" ||
+        (participantTokenHash !== undefined && (await hasParticipantEventAccess(db, row.event.id, participantTokenHash)))
+
       return {
         event: {
           publicId: row.event.publicId,
@@ -597,7 +613,8 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           startsAt: row.event.startsAt,
           endsAt: row.event.endsAt,
           publicJoinEnabled: row.event.publicJoinEnabled,
-          publicQueueEnabled: row.event.publicQueueEnabled
+          publicQueueEnabled: row.event.publicQueueEnabled,
+          joinAccessMode: row.event.joinAccessMode
         },
         venue: {
           slug: row.venue.slug,
@@ -609,42 +626,57 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           slug: row.organization.slug,
           name: row.organization.name
         },
-        submissions: getPublicSubmissionsState(row.event),
+        submissions: getPublicSubmissionsState(row.event, { hasParticipantAccess }),
         publicQueue: getPublicQueueState(row.event)
       }
     },
 
-    async claimPublicInvite(inviteCode) {
-      const rows = await db
-        .select(publicInviteClaimSelection)
-        .from(eventInvites)
-        .innerJoin(events, eq(eventInvites.eventId, events.id))
-        .innerJoin(venues, eq(events.venueId, venues.id))
-        .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
-        .where(eq(eventInvites.code, inviteCode))
-        .limit(1)
-      const row = rows[0]
-      if (!row || row.invite.status !== "active" || isExpired(row.invite.expiresAt)) {
-        throw invalidInvite()
-      }
-
-      try {
-        assertPublicEventContainerVisible({
-          venue: row.venue,
-          organization: row.organization
-        })
-        assertPublicEventDetailVisible(row.event)
-      } catch (error) {
-        if (error instanceof ApiHttpError && error.statusCode === 404) {
+    async claimPublicInvite(inviteCode, participantTokenHash) {
+      return inTransaction(db, async (tx) => {
+        const rows = await tx
+          .select(publicInviteClaimSelection)
+          .from(eventInvites)
+          .innerJoin(events, eq(eventInvites.eventId, events.id))
+          .innerJoin(venues, eq(events.venueId, venues.id))
+          .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+          .where(eq(eventInvites.code, inviteCode))
+          .limit(1)
+        const row = rows[0]
+        if (!row || row.invite.status !== "active" || isExpired(row.invite.expiresAt)) {
           throw invalidInvite()
         }
-        throw error
-      }
 
-      return {
-        eventPublicId: row.event.publicId,
-        redirectTo: `/event/${row.event.publicId}`
-      }
+        try {
+          assertPublicEventContainerVisible({
+            venue: row.venue,
+            organization: row.organization
+          })
+          assertPublicEventDetailVisible(row.event)
+        } catch (error) {
+          if (error instanceof ApiHttpError && error.statusCode === 404) {
+            throw invalidInvite()
+          }
+          throw error
+        }
+
+        if (row.event.joinAccessMode === "invite_required") {
+          await tx
+            .insert(participantEventAccess)
+            .values({
+              eventId: row.event.id,
+              participantTokenHash,
+              grantedByInviteId: row.invite.id
+            })
+            .onConflictDoNothing({
+              target: [participantEventAccess.eventId, participantEventAccess.participantTokenHash]
+            })
+        }
+
+        return {
+          eventPublicId: row.event.publicId,
+          redirectTo: `/event/${row.event.publicId}`
+        }
+      })
     }
   }
 }
@@ -809,7 +841,8 @@ const eventSelection = {
   startsAt: events.startsAt,
   endsAt: events.endsAt,
   publicJoinEnabled: events.publicJoinEnabled,
-  publicQueueEnabled: events.publicQueueEnabled
+  publicQueueEnabled: events.publicQueueEnabled,
+  joinAccessMode: events.joinAccessMode
 }
 
 const dashboardEventSelection = {
@@ -823,6 +856,7 @@ const dashboardEventSelection = {
 
 const publicEventDetailSelection = {
   event: {
+    id: events.id,
     publicId: events.publicId,
     name: events.name,
     slug: events.slug,
@@ -830,7 +864,8 @@ const publicEventDetailSelection = {
     startsAt: events.startsAt,
     endsAt: events.endsAt,
     publicJoinEnabled: events.publicJoinEnabled,
-    publicQueueEnabled: events.publicQueueEnabled
+    publicQueueEnabled: events.publicQueueEnabled,
+    joinAccessMode: events.joinAccessMode
   },
   venue: {
     slug: venues.slug,
@@ -854,7 +889,8 @@ const publicEventResolutionSelection = {
     venueId: events.venueId,
     status: events.status,
     publicJoinEnabled: events.publicJoinEnabled,
-    publicQueueEnabled: events.publicQueueEnabled
+    publicQueueEnabled: events.publicQueueEnabled,
+    joinAccessMode: events.joinAccessMode
   },
   venue: {
     status: venues.status,
@@ -867,14 +903,17 @@ const publicEventResolutionSelection = {
 
 const publicInviteClaimSelection = {
   invite: {
+    id: eventInvites.id,
     status: eventInvites.status,
     expiresAt: eventInvites.expiresAt
   },
   event: {
+    id: events.id,
     publicId: events.publicId,
     status: events.status,
     publicJoinEnabled: events.publicJoinEnabled,
-    publicQueueEnabled: events.publicQueueEnabled
+    publicQueueEnabled: events.publicQueueEnabled,
+    joinAccessMode: events.joinAccessMode
   },
   venue: {
     status: venues.status,
@@ -883,6 +922,25 @@ const publicInviteClaimSelection = {
   organization: {
     status: organizations.status
   }
+}
+
+async function hasParticipantEventAccess(
+  db: DbClient,
+  eventId: string,
+  participantTokenHash: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: participantEventAccess.id })
+    .from(participantEventAccess)
+    .where(
+      and(
+        eq(participantEventAccess.eventId, eventId),
+        eq(participantEventAccess.participantTokenHash, participantTokenHash)
+      )
+    )
+    .limit(1)
+
+  return rows.length > 0
 }
 
 type DashboardEventRow = EventSummary & {
@@ -907,6 +965,7 @@ function mapDashboardEventRow(row: DashboardEventRow): DashboardEventSummary {
     endsAt: row.endsAt,
     publicJoinEnabled: row.publicJoinEnabled,
     publicQueueEnabled: row.publicQueueEnabled,
+    joinAccessMode: row.joinAccessMode,
     venue: {
       id: row.venueId,
       name: row.venueName,

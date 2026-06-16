@@ -1,6 +1,7 @@
 import {
   events,
   organizations,
+  participantEventAccess,
   queueEvents,
   songRequests,
   songSources,
@@ -52,6 +53,7 @@ export type PublicQueueResponse = {
     endsAt: Date | null
     publicJoinEnabled: boolean
     publicQueueEnabled: boolean
+    joinAccessMode: string
   } | null
   venue: {
     id: string
@@ -210,6 +212,12 @@ export function createQueueService(db: DbClient, eventBus?: DomainEventBus, anti
         const context = await getPublicEventContext(tx, eventId)
         if (context.event.status !== "active" || !context.event.publicJoinEnabled) {
           throw new ApiHttpError(409, "CONFLICT", "Event is not accepting public song requests")
+        }
+        if (
+          context.event.joinAccessMode === "invite_required" &&
+          !(await hasParticipantEventAccess(tx, eventId, input.participantTokenHash))
+        ) {
+          throw new ApiHttpError(403, "ACCESS_REQUIRED", "Invite access is required to submit to this event")
         }
 
         await requireActiveSongSource(tx, input.sourceId)
@@ -488,7 +496,8 @@ async function getEventContext(db: DbClient, eventId: string) {
         name: events.name,
         status: events.status,
         publicJoinEnabled: events.publicJoinEnabled,
-        publicQueueEnabled: events.publicQueueEnabled
+        publicQueueEnabled: events.publicQueueEnabled,
+        joinAccessMode: events.joinAccessMode
       },
       venue: {
         id: venues.id,
@@ -514,6 +523,25 @@ async function getEventContext(db: DbClient, eventId: string) {
   }
 
   return context
+}
+
+async function hasParticipantEventAccess(
+  db: DbClient,
+  eventId: string,
+  participantTokenHash: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: participantEventAccess.id })
+    .from(participantEventAccess)
+    .where(
+      and(
+        eq(participantEventAccess.eventId, eventId),
+        eq(participantEventAccess.participantTokenHash, participantTokenHash)
+      )
+    )
+    .limit(1)
+
+  return rows.length > 0
 }
 
 async function getPublicEventContext(db: DbClient, eventId: string): Promise<Awaited<ReturnType<typeof getEventContext>>> {

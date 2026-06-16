@@ -466,7 +466,8 @@ function eventContext() {
       name: "SSE Event",
       status: "active",
       publicJoinEnabled: true,
-      publicQueueEnabled: true
+      publicQueueEnabled: true,
+      joinAccessMode: "open"
     },
     venue: {
       id: VENUE_ID,
@@ -521,7 +522,8 @@ function makeEvent(status: string): EventSummary {
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
-    publicQueueEnabled: true
+    publicQueueEnabled: true,
+    joinAccessMode: "open"
   }
 }
 
@@ -568,7 +570,8 @@ function fakeEventsService(event: EventSummary | null = makeEvent("active")): Ap
             venueId: event.venueId,
             status: event.status,
             publicJoinEnabled: event.publicJoinEnabled,
-            publicQueueEnabled: event.publicQueueEnabled
+            publicQueueEnabled: event.publicQueueEnabled,
+            joinAccessMode: event.joinAccessMode
           }
         : null,
     getPublicActiveEventByVenueSlug: async (venueSlug: string) =>
@@ -618,7 +621,8 @@ function fakeDbResources(
                 name: event.name,
                 status: event.status,
                 publicJoinEnabled: event.publicJoinEnabled,
-                publicQueueEnabled: event.publicQueueEnabled
+                publicQueueEnabled: event.publicQueueEnabled,
+                joinAccessMode: event.joinAccessMode
               },
               venue: {
                 id: VENUE_ID,

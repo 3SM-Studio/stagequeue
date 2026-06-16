@@ -53,10 +53,10 @@ export async function getVenueMetadataData(venueSlug: string): Promise<Venue | n
   }
 }
 
-export async function getPublicEventPageData(eventPublicId: string): Promise<PublicEventPageData> {
+export async function getPublicEventPageData(eventPublicId: string, cookieHeader?: string | null): Promise<PublicEventPageData> {
   try {
-    const detail = await getServerPublicEventDetail(eventPublicId)
-    const queue = detail.publicQueue.visible ? await getServerPublicQueue(eventPublicId) : null
+    const detail = await getServerPublicEventDetail(eventPublicId, cookieHeader)
+    const queue = detail.publicQueue.visible ? await getServerPublicQueue(eventPublicId, cookieHeader) : null
     return {
       kind: "ready",
       detail,

@@ -154,7 +154,8 @@ function isPublicEvent(value: unknown): value is PublicEvent {
     isNullableString(value.startsAt) &&
     isNullableString(value.endsAt) &&
     typeof value.publicJoinEnabled === "boolean" &&
-    typeof value.publicQueueEnabled === "boolean"
+    typeof value.publicQueueEnabled === "boolean" &&
+    isJoinAccessMode(value.joinAccessMode)
   )
 }
 
@@ -168,7 +169,8 @@ function isPublicEventDetailEvent(value: unknown): value is PublicEventDetail["e
     isNullableString(value.startsAt) &&
     isNullableString(value.endsAt) &&
     typeof value.publicJoinEnabled === "boolean" &&
-    typeof value.publicQueueEnabled === "boolean"
+    typeof value.publicQueueEnabled === "boolean" &&
+    isJoinAccessMode(value.joinAccessMode)
   )
 }
 
@@ -248,6 +250,10 @@ function isEventStatus(value: unknown): value is PublicEvent["status"] {
 
 function isRequestStatus(value: unknown): value is PublicMyRequest["status"] {
   return isString(value) && ["pending", "approved", "now", "done", "rejected", "skipped"].includes(value)
+}
+
+function isJoinAccessMode(value: unknown): value is PublicEvent["joinAccessMode"] {
+  return isString(value) && ["open", "invite_required"].includes(value)
 }
 
 function isNullableString(value: unknown): value is string | null {

@@ -30,6 +30,7 @@ export type PublicEvent = {
   endsAt: string | null
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  joinAccessMode: "open" | "invite_required"
 }
 
 export type ActiveEventLookup = {
@@ -53,6 +54,7 @@ export type PublicEventDetail = {
     endsAt: string | null
     publicJoinEnabled: boolean
     publicQueueEnabled: boolean
+    joinAccessMode: PublicEvent["joinAccessMode"]
   }
   venue: {
     slug: string

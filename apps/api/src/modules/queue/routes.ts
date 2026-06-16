@@ -329,7 +329,8 @@ function toPublicActiveEvent(event: Awaited<ReturnType<typeof requireVenueActive
     startsAt: event.startsAt,
     endsAt: event.endsAt,
     publicJoinEnabled: event.publicJoinEnabled,
-    publicQueueEnabled: event.publicQueueEnabled
+    publicQueueEnabled: event.publicQueueEnabled,
+    joinAccessMode: event.joinAccessMode
   }
 }
 

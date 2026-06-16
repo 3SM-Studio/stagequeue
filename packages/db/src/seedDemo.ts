@@ -60,6 +60,7 @@ type DemoEventInput = {
   status: string
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  joinAccessMode: "open" | "invite_required"
 }
 
 type DemoEventInviteInput = {
@@ -144,7 +145,8 @@ export function buildDemoSeedData() {
       name: "Demo Karaoke Night",
       status: "active",
       publicJoinEnabled: true,
-      publicQueueEnabled: true
+      publicQueueEnabled: true,
+      joinAccessMode: "open"
     },
     requests: [
       {

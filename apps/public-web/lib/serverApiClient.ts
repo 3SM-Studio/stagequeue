@@ -42,12 +42,16 @@ export async function getActiveEvent(venueSlug: string): Promise<ActiveEventLook
   return assertActiveEventResponse(await fetchServerJson(`/public/venues/${encodeURIComponent(venueSlug)}/active-event`))
 }
 
-export async function getServerPublicQueue(eventId: string): Promise<PublicQueue> {
-  return assertPublicQueueResponse(await fetchServerJson(`/public/events/${encodeURIComponent(eventId)}/queue`))
+export async function getServerPublicQueue(eventId: string, cookieHeader?: string | null): Promise<PublicQueue> {
+  return assertPublicQueueResponse(
+    await fetchServerJson(`/public/events/${encodeURIComponent(eventId)}/queue`, requestInitWithCookie(cookieHeader))
+  )
 }
 
-export async function getServerPublicEventDetail(eventPublicId: string): Promise<PublicEventDetail> {
-  return assertPublicEventDetailResponse(await fetchServerJson(`/public/events/${encodeURIComponent(eventPublicId)}`))
+export async function getServerPublicEventDetail(eventPublicId: string, cookieHeader?: string | null): Promise<PublicEventDetail> {
+  return assertPublicEventDetailResponse(
+    await fetchServerJson(`/public/events/${encodeURIComponent(eventPublicId)}`, requestInitWithCookie(cookieHeader))
+  )
 }
 
 export type ServerInviteClaimResult = {
@@ -102,6 +106,10 @@ async function fetchServerJson(path: string, init: RequestInit = {}): Promise<un
   }
 
   return response.json() as Promise<unknown>
+}
+
+function requestInitWithCookie(cookieHeader?: string | null): RequestInit {
+  return cookieHeader ? { headers: { cookie: cookieHeader } } : {}
 }
 
 async function readApiErrorBody(response: Response): Promise<ApiErrorBody> {

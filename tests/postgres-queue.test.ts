@@ -5,6 +5,7 @@ import { createApiApp } from "../apps/api/src/app.ts"
 import type { AuthenticatedDomainUser } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
+import { participantEventAccess, queueEvents, songRequests } from "../packages/db/src/schema.ts"
 import {
   createEventsService,
   type EventSummary,
@@ -449,6 +450,115 @@ test("public submit is blocked when publicJoinEnabled is false", async () => {
   }
 })
 
+test("open event allows public submit without invite access", async () => {
+  const db = fakeDbForQueueSubmit({ joinAccessMode: "open" })
+  const app = await createTestApp({
+    db,
+    queue: createQueueService(db.db)
+  })
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+      payload: publicSubmitPayload()
+    })
+
+    assert.equal(response.statusCode, 201)
+    assert.equal(db.state.requests.length, 1)
+  } finally {
+    await app.close()
+  }
+})
+
+test("invite-required event rejects public submit without participant access", async () => {
+  const db = fakeDbForQueueSubmit({ joinAccessMode: "invite_required" })
+  const app = await createTestApp({
+    db,
+    queue: createQueueService(db.db)
+  })
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+      payload: publicSubmitPayload()
+    })
+
+    assert.equal(response.statusCode, 403)
+    assert.equal(response.json().error.code, "ACCESS_REQUIRED")
+    assert.equal(db.state.requests.length, 0)
+  } finally {
+    await app.close()
+  }
+})
+
+test("invite-required event allows public submit after invite claim", async () => {
+  const claimDb = fakeDbForPublicInviteClaim({ status: "active", joinAccessMode: "invite_required" })
+  const claimApp = await createTestApp({
+    db: claimDb,
+    events: createEventsService(claimDb.db)
+  })
+  let token = ""
+  try {
+    const claim = await claimApp.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
+    token = readParticipantCookie(claim)
+
+    assert.equal(claim.statusCode, 200)
+    assert.equal(readAccessRows(claimDb).length, 1)
+  } finally {
+    await claimApp.close()
+  }
+
+  const submitDb = fakeDbForQueueSubmit({
+    joinAccessMode: "invite_required",
+    accessRows: readAccessRows(claimDb)
+  })
+  const submitApp = await createTestApp({
+    db: submitDb,
+    queue: createQueueService(submitDb.db)
+  })
+  try {
+    const response = await submitApp.inject({
+      method: "POST",
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
+      payload: publicSubmitPayload()
+    })
+
+    assert.equal(response.statusCode, 201)
+    assert.equal(submitDb.state.requests.length, 1)
+  } finally {
+    await submitApp.close()
+  }
+})
+
+test("publicJoinEnabled false blocks submit even after invite access", async () => {
+  const token = "participant-token-with-invite-access-123"
+  const participantTokenHash = hashParticipantToken(token, testConfig().participantTokenSecret)
+  const db = fakeDbForQueueSubmit({
+    joinAccessMode: "invite_required",
+    publicJoinEnabled: false,
+    accessRows: [{ eventId: ACTIVE_EVENT_ID, participantTokenHash, grantedByInviteId: "invite-1" }]
+  })
+  const app = await createTestApp({
+    db,
+    queue: createQueueService(db.db)
+  })
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
+      payload: publicSubmitPayload()
+    })
+
+    assert.equal(response.statusCode, 409)
+    assert.equal(response.json().error.code, "CONFLICT")
+    assert.equal(db.state.requests.length, 0)
+  } finally {
+    await app.close()
+  }
+})
+
 test("public event detail returns active public event", async () => {
   const db = fakeDbForPublicEventDetail({ status: "active", publicJoinEnabled: true, publicQueueEnabled: true })
   const app = await createTestApp({
@@ -493,7 +603,8 @@ test("public event detail does not use internal event id as public id", async ()
                 startsAt: null,
                 endsAt: null,
                 publicJoinEnabled: true,
-                publicQueueEnabled: true
+                publicQueueEnabled: true,
+                joinAccessMode: "open"
               },
               venue: { slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
               operatedByOrganization: { slug: "poza-nuta-demo", name: "Poza Nuta Demo" },
@@ -642,6 +753,55 @@ test("public invite claim reuses existing participant cookie", async () => {
   }
 })
 
+test("valid invite claim creates participant event access without storing raw token", async () => {
+  const db = fakeDbForPublicInviteClaim({ status: "active", joinAccessMode: "invite_required" })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db)
+  })
+  try {
+    const response = await app.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
+    const token = readParticipantCookie(response)
+    const accessRows = readAccessRows(db)
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(accessRows.length, 1)
+    assert.equal(accessRows[0]?.eventId, ACTIVE_EVENT_ID)
+    assert.equal(accessRows[0]?.participantTokenHash, hashParticipantToken(token, testConfig().participantTokenSecret))
+    assert.notEqual(accessRows[0]?.participantTokenHash, token)
+    assert.equal(JSON.stringify(accessRows).includes(token), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("duplicate invite claim does not create duplicate participant access", async () => {
+  const db = fakeDbForPublicInviteClaim({ status: "active", joinAccessMode: "invite_required" })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db)
+  })
+  const token = "participant-token-duplicate-claim-123"
+  try {
+    const first = await app.inject({
+      method: "POST",
+      url: "/public/invites/inviteCode1/claim",
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` }
+    })
+    const second = await app.inject({
+      method: "POST",
+      url: "/public/invites/inviteCode1/claim",
+      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` }
+    })
+
+    assert.equal(first.statusCode, 200)
+    assert.equal(second.statusCode, 200)
+    assert.equal(readAccessRows(db).length, 1)
+  } finally {
+    await app.close()
+  }
+})
+
 test("public invite claim rejects revoked and expired invites with controlled not found", async () => {
   for (const invite of [
     { inviteStatus: "revoked" },
@@ -659,6 +819,7 @@ test("public invite claim rejects revoked and expired invites with controlled no
       assert.equal(response.json().error.code, "NOT_FOUND")
       assert.equal(response.json().error.message, "Invalid or expired invite")
       assert.equal(response.body.includes("inviteCode1"), false)
+      assert.equal(readAccessRows(db).length, 0)
     } finally {
       await app.close()
     }
@@ -716,6 +877,25 @@ test("event invites table and code unique constraint exist in schema and migrati
   assert.match(migrationSource, /CREATE TABLE "event_invites"/)
   assert.match(migrationSource, /CONSTRAINT "event_invites_code_unique" UNIQUE\("code"\)/)
   assert.match(migrationSource, /INSERT INTO "event_invites"/)
+})
+
+test("participant event access schema and migration protect invite-required access", () => {
+  const schemaSource = readFileSync("packages/db/src/schema.ts", "utf8")
+  const migrationSource = readFileSync("packages/db/drizzle/0009_optimal_james_howlett.sql", "utf8")
+
+  assert.match(schemaSource, /joinAccessMode/)
+  assert.match(schemaSource, /events_join_access_mode_check/)
+  assert.match(schemaSource, /participantEventAccess/)
+  assert.match(schemaSource, /participant_event_access_event_token_unique/)
+  assert.match(migrationSource, /ALTER TABLE "events" ADD COLUMN "join_access_mode" text DEFAULT 'open' NOT NULL/)
+  assert.match(
+    migrationSource,
+    /CONSTRAINT "events_join_access_mode_check" CHECK \("events"\."join_access_mode" in \('open', 'invite_required'\)\)/
+  )
+  assert.match(migrationSource, /CREATE TABLE "participant_event_access"/)
+  assert.match(migrationSource, /CONSTRAINT "participant_event_access_event_token_unique" UNIQUE\("event_id","participant_token_hash"\)/)
+  assert.match(migrationSource, /REFERENCES "public"."events"\("id"\) ON DELETE cascade/)
+  assert.match(migrationSource, /REFERENCES "public"."event_invites"\("id"\) ON DELETE set null/)
 })
 
 test("event-id public submit hides events from non-public venues and organizations", async () => {
@@ -1958,7 +2138,8 @@ function fakeEventsService(options: { lookup?: PublicActiveEventLookup | null } 
           venueId: activeEvent.venueId,
           status: activeEvent.status,
           publicJoinEnabled: activeEvent.publicJoinEnabled,
-          publicQueueEnabled: activeEvent.publicQueueEnabled
+          publicQueueEnabled: activeEvent.publicQueueEnabled,
+          joinAccessMode: activeEvent.joinAccessMode
         }
       }
       return null
@@ -1983,7 +2164,8 @@ function findPublicEventResolution(eventPublicId: string) {
         venueId: VENUE_ID,
         status: event.status,
         publicJoinEnabled: true,
-        publicQueueEnabled: true
+        publicQueueEnabled: true,
+        joinAccessMode: "open"
       }
     : null
 }
@@ -2014,7 +2196,8 @@ function makePublicEvent(eventId: string, status: string): EventSummary {
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
-    publicQueueEnabled: true
+    publicQueueEnabled: true,
+    joinAccessMode: "open"
   }
 }
 
@@ -2055,10 +2238,121 @@ function fakeDbResources(): DbResources {
   }
 }
 
+type ParticipantAccessRow = {
+  eventId: string
+  participantTokenHash: string
+  grantedByInviteId: string | null
+}
+
+function fakeDbForQueueSubmit(options: {
+  status?: string
+  publicJoinEnabled?: boolean
+  publicQueueEnabled?: boolean
+  joinAccessMode: "open" | "invite_required"
+  accessRows?: ParticipantAccessRow[]
+}): DbResources & {
+  state: {
+    events: Map<string, { id: string; publicId: string; name: string; status: string }>
+    requests: QueueSongRequest[]
+    queueEvents: Array<{ eventId: string; requestId: string; type: string }>
+  }
+} {
+  const state = {
+    events: new Map([
+      [ACTIVE_EVENT_ID, { id: ACTIVE_EVENT_ID, publicId: ACTIVE_EVENT_PUBLIC_ID, name: "Active Event", status: options.status ?? "active" }]
+    ]),
+    requests: [] as QueueSongRequest[],
+    queueEvents: [] as Array<{ eventId: string; requestId: string; type: string }>
+  }
+  let idOnlySelectCount = 0
+  const accessRows = options.accessRows ?? []
+  const db = {
+    execute: async () => [],
+    select: (selection?: Record<string, unknown>) => {
+      if (selection && "event" in selection) {
+        return queryChain([
+          {
+            event: {
+              id: ACTIVE_EVENT_ID,
+              publicId: ACTIVE_EVENT_PUBLIC_ID,
+              venueId: VENUE_ID,
+              operatedByOrganizationId: "77777777-7777-4777-8777-777777777777",
+              name: "Active Event",
+              status: options.status ?? "active",
+              publicJoinEnabled: options.publicJoinEnabled ?? true,
+              publicQueueEnabled: options.publicQueueEnabled ?? true,
+              joinAccessMode: options.joinAccessMode
+            },
+            venue: {
+              id: VENUE_ID,
+              name: "Klub X",
+              slug: "klub-x",
+              status: "active",
+              verificationStatus: "verified"
+            },
+            organization: {
+              id: "77777777-7777-4777-8777-777777777777",
+              status: "active"
+            }
+          }
+        ])
+      }
+
+      if (selection && "status" in selection && "requestedAt" in selection) {
+        return queryChain([])
+      }
+
+      if (selection && "id" in selection) {
+        idOnlySelectCount += 1
+        if (options.joinAccessMode === "invite_required" && idOnlySelectCount === 1) {
+          return queryChain(accessRows.length > 0 ? [{ id: "participant-access-1" }] : [])
+        }
+        return queryChain([{ id: "ising" }])
+      }
+
+      return queryChain([])
+    },
+    insert: (table: unknown) => ({
+      values: (value: any) => {
+        if (table === songRequests) {
+          return {
+            returning: () => {
+              const request = addRequestToState(state, ACTIVE_EVENT_ID, "pending", {
+                ...value,
+                id: `66666666-6666-4666-8666-${String(state.requests.length + 1).padStart(12, "0")}`,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                requestedAt: new Date()
+              })
+              return [request]
+            }
+          }
+        }
+
+        if (table === queueEvents) {
+          state.queueEvents.push({ eventId: value.eventId, requestId: value.requestId, type: value.type })
+          return undefined
+        }
+
+        throw new Error("Unexpected insert")
+      }
+    })
+  } as unknown as DbResources["db"]
+
+  return {
+    db,
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"],
+    state
+  }
+}
+
 function fakeDbForQueueEventContext(event: {
   status: string
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  joinAccessMode?: "open" | "invite_required"
   venueStatus?: string
   venueVerificationStatus?: string
   organizationStatus?: string
@@ -2073,7 +2367,8 @@ function fakeDbForQueueEventContext(event: {
             venueId: VENUE_ID,
             operatedByOrganizationId: "77777777-7777-4777-8777-777777777777",
             name: "Active Event",
-            ...event
+            ...event,
+            joinAccessMode: event.joinAccessMode ?? "open"
           },
           venue: {
             id: VENUE_ID,
@@ -2107,7 +2402,8 @@ function fakeDbForPublicQueueStatus(status: string): DbResources {
               name: "Public Queue Event",
               status,
               publicJoinEnabled: true,
-              publicQueueEnabled: true
+              publicQueueEnabled: true,
+              joinAccessMode: "open"
             },
             venue: {
               id: VENUE_ID,
@@ -2133,42 +2429,52 @@ function fakeDbForPublicEventDetail(event: {
   status: string
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  joinAccessMode?: "open" | "invite_required"
+  participantAccess?: boolean
   venueStatus?: string
   venueVerificationStatus?: string
   organizationStatus?: string
 }): DbResources {
+  let selectCount = 0
   return fakeDbResourcesWithClient({
-    select: () =>
-      queryChain([
-        {
-          event: {
-            id: ACTIVE_EVENT_ID,
-            publicId: ACTIVE_EVENT_PUBLIC_ID,
-            name: "Active Event",
-            slug: "active-event",
-            status: event.status,
-            startsAt: null,
-            endsAt: null,
-            publicJoinEnabled: event.publicJoinEnabled,
-            publicQueueEnabled: event.publicQueueEnabled
-          },
-          venue: {
-            id: VENUE_ID,
-            slug: "klub-x",
-            name: "Klub X",
-            city: "Warszawa",
-            timezone: "Europe/Warsaw",
-            status: event.venueStatus ?? "active",
-            verificationStatus: event.venueVerificationStatus ?? "verified"
-          },
-          organization: {
-            id: "77777777-7777-4777-8777-777777777777",
-            slug: "poza-nuta-demo",
-            name: "Poza Nuta Demo",
-            status: event.organizationStatus ?? "active"
+    select: () => {
+      selectCount += 1
+      if (selectCount === 1) {
+        return queryChain([
+          {
+            event: {
+              id: ACTIVE_EVENT_ID,
+              publicId: ACTIVE_EVENT_PUBLIC_ID,
+              name: "Active Event",
+              slug: "active-event",
+              status: event.status,
+              startsAt: null,
+              endsAt: null,
+              publicJoinEnabled: event.publicJoinEnabled,
+              publicQueueEnabled: event.publicQueueEnabled,
+              joinAccessMode: event.joinAccessMode ?? "open"
+            },
+            venue: {
+              id: VENUE_ID,
+              slug: "klub-x",
+              name: "Klub X",
+              city: "Warszawa",
+              timezone: "Europe/Warsaw",
+              status: event.venueStatus ?? "active",
+              verificationStatus: event.venueVerificationStatus ?? "verified"
+            },
+            organization: {
+              id: "77777777-7777-4777-8777-777777777777",
+              slug: "poza-nuta-demo",
+              name: "Poza Nuta Demo",
+              status: event.organizationStatus ?? "active"
+            }
           }
-        }
-      ])
+        ])
+      }
+
+      return queryChain(event.participantAccess ? [{ id: "participant-access-1" }] : [])
+    }
   } as unknown as DbResources["db"])
 }
 
@@ -2179,20 +2485,25 @@ function fakeDbForPublicInviteClaim(event: {
   venueStatus?: string
   venueVerificationStatus?: string
   organizationStatus?: string
+  joinAccessMode?: "open" | "invite_required"
 }): DbResources {
+  const accessRows: Array<{ eventId: string; participantTokenHash: string; grantedByInviteId: string | null }> = []
   return fakeDbResourcesWithClient({
     select: () =>
       queryChain([
         {
           invite: {
+            id: "99999999-9999-4999-8999-999999999999",
             status: event.inviteStatus ?? "active",
             expiresAt: event.expiresAt ?? null
           },
           event: {
+            id: ACTIVE_EVENT_ID,
             publicId: ACTIVE_EVENT_PUBLIC_ID,
             status: event.status,
             publicJoinEnabled: true,
-            publicQueueEnabled: true
+            publicQueueEnabled: true,
+            joinAccessMode: event.joinAccessMode ?? "open"
           },
           venue: {
             status: event.venueStatus ?? "active",
@@ -2202,8 +2513,32 @@ function fakeDbForPublicInviteClaim(event: {
             status: event.organizationStatus ?? "active"
           }
         }
-      ])
-  } as unknown as DbResources["db"])
+      ]),
+    insert: (table: unknown) => ({
+      values: (value: { eventId: string; participantTokenHash: string; grantedByInviteId?: string | null }) => {
+        if (table === participantEventAccess) {
+          return {
+            onConflictDoNothing: async () => {
+              if (!accessRows.some((row) => row.eventId === value.eventId && row.participantTokenHash === value.participantTokenHash)) {
+                accessRows.push({
+                  eventId: value.eventId,
+                  participantTokenHash: value.participantTokenHash,
+                  grantedByInviteId: value.grantedByInviteId ?? null
+                })
+              }
+            }
+          }
+        }
+
+        throw new Error("Unexpected insert")
+      }
+    }),
+    accessRows
+  } as unknown as DbResources["db"] & { accessRows: typeof accessRows })
+}
+
+function readAccessRows(db: DbResources): ParticipantAccessRow[] {
+  return (db.db as unknown as { accessRows: ParticipantAccessRow[] }).accessRows
 }
 
 function fakeDbResourcesWithClient(db: DbResources["db"]): DbResources {

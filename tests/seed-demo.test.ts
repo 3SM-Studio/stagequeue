@@ -20,6 +20,7 @@ test("demo seed data describes the public QA happy path", () => {
   assert.equal(data.event.status, "active")
   assert.equal(data.event.publicJoinEnabled, true)
   assert.equal(data.event.publicQueueEnabled, true)
+  assert.equal(data.event.joinAccessMode, "open")
   assert.deepEqual(
     data.requests.map((request) => [request.singerName, request.status, request.position]),
     [
@@ -78,6 +79,7 @@ function createInMemoryDemoSeedRepository() {
         name: string
         publicJoinEnabled: boolean
         publicQueueEnabled: boolean
+        joinAccessMode: "open" | "invite_required"
       }
     >,
     requests: [] as Array<{ id: string; eventId: string; status: string; position: number | null; singerName: string }>,

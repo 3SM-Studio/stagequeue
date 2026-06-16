@@ -21,6 +21,7 @@ export type PublicEventDetailVisibilityEvent = {
   status: string
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  joinAccessMode?: string
 }
 
 export type PublicEventContainerVisibility = {
@@ -61,13 +62,20 @@ export function assertPublicEventDetailVisible(event: PublicEventDetailVisibilit
   }
 }
 
-export function getPublicSubmissionsState(event: PublicEventDetailVisibilityEvent): { enabled: boolean; reason?: string } {
+export function getPublicSubmissionsState(
+  event: PublicEventDetailVisibilityEvent,
+  options: { hasParticipantAccess?: boolean } = {}
+): { enabled: boolean; reason?: string } {
   if (event.status !== "active") {
     return { enabled: false, reason: "EVENT_NOT_ACTIVE" }
   }
 
   if (!event.publicJoinEnabled) {
     return { enabled: false, reason: "PUBLIC_JOIN_DISABLED" }
+  }
+
+  if (event.joinAccessMode === "invite_required" && options.hasParticipantAccess !== true) {
+    return { enabled: false, reason: "ACCESS_REQUIRED" }
   }
 
   return { enabled: true }

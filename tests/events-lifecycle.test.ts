@@ -739,7 +739,8 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
             venueId: event.venueId,
             status: event.status,
             publicJoinEnabled: event.publicJoinEnabled,
-            publicQueueEnabled: event.publicQueueEnabled
+            publicQueueEnabled: event.publicQueueEnabled,
+            joinAccessMode: event.joinAccessMode
           }
         : null
     },
@@ -758,7 +759,8 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
           startsAt: event.startsAt,
           endsAt: event.endsAt,
           publicJoinEnabled: event.publicJoinEnabled,
-          publicQueueEnabled: event.publicQueueEnabled
+          publicQueueEnabled: event.publicQueueEnabled,
+          joinAccessMode: event.joinAccessMode
         },
         venue: { slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
         operatedByOrganization: { slug: "org-x", name: "Org X" },
@@ -797,7 +799,8 @@ function makeEvent(id: string, slug: string, status: string): EventSummary {
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
-    publicQueueEnabled: true
+    publicQueueEnabled: true,
+    joinAccessMode: "open"
   }
 }
 

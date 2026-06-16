@@ -1,3 +1,4 @@
+import { headers } from "next/headers"
 import { notFound } from "next/navigation"
 import { PublicEventParticipantView } from "../../../components/PublicEventParticipantView"
 import { ApiErrorPanel } from "../../../components/StatePanels"
@@ -9,7 +10,8 @@ type PublicEventPageProps = {
 
 export default async function PublicEventPage({ params }: PublicEventPageProps) {
   const { eventPublicId } = await params
-  const data = await getPublicEventPageData(eventPublicId)
+  const requestHeaders = await headers()
+  const data = await getPublicEventPageData(eventPublicId, requestHeaders.get("cookie"))
 
   if (data.kind === "not-found") {
     notFound()
