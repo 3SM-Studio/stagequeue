@@ -14,6 +14,8 @@ Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zast
 - [ ] `PUBLIC_WEB_URL` ustawiony na publiczny HTTPS URL public-web.
 - [ ] `DASHBOARD_WEB_URL` ustawiony na publiczny HTTPS URL dashboard-web.
 - [ ] `PLATFORM_SETUP_TOKEN` ustawiony, jeśli `PLATFORM_SETUP_ENABLED=true`.
+- [ ] `BOOTSTRAP_PLATFORM_OWNER_EMAIL` nie jest ustawiony w produkcji; first-owner setup idzie przez `PLATFORM_SETUP_TOKEN`.
+- [ ] Legacy API nie jest wdrażane produkcyjnie. Jeśli wyjątkowo zostaje, `API_ADMIN_TOKEN` jest ustawiony i traktowany jako produkcyjny sekret.
 - [ ] `COOKIE_DOMAIN` ustawiony zgodnie z produkcyjnymi domenami, jeśli sesje mają działać między subdomenami.
 - [ ] `API_INTERNAL_URL` ustawiony tylko dla server-side web app, jeśli hosting używa wewnętrznej sieci do API.
 

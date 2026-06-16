@@ -86,6 +86,7 @@ pnpm build:web:legacy
 ```
 
 `apps/web` oraz `apps/api/src/server.ts` zostają chwilowo jako legacy reference i coverage dla starego MVP. Nie są domyślnym kierunkiem rozwoju platformy.
+Legacy API nie jest production deployment target. Jesli zostaje uruchomione poza lokalnym/dev flow, musi byc jawnie zabezpieczone `API_ADMIN_TOKEN`.
 
 Szybki check bez tworzenia ZIP-a:
 
@@ -234,7 +235,7 @@ AUTH_SECRET=replace_me_with_at_least_32_random_characters
 PARTICIPANT_TOKEN_SECRET=replace_me_with_at_least_32_random_characters
 PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT=3
 PUBLIC_REQUEST_COOLDOWN_SECONDS=20
-# Legacy/dev fallback only.
+# Development/test-only fallback. Production rejects this env and uses PLATFORM_SETUP_TOKEN.
 BOOTSTRAP_PLATFORM_OWNER_EMAIL=replace_me@example.com
 PLATFORM_SETUP_ENABLED=true
 PLATFORM_SETUP_TOKEN=replace_me_with_one_time_setup_token
@@ -247,8 +248,8 @@ Better Auth zapisuje swoje dane w tabelach `auth_users`, `auth_sessions`, `auth_
 - bez sesji zwraca `{ "authenticated": false }`,
 - z sesja tworzy albo aktualizuje domenowego usera,
 - user bez approval ma `status: "pending"` i nie ma dashboard access,
-- produkcyjny first-owner flow powinien uzywac `PLATFORM_SETUP_TOKEN` i `/setup` w dashboardzie,
-- `BOOTSTRAP_PLATFORM_OWNER_EMAIL` zostaje tylko jako legacy/dev fallback i tymczasowy shortcut,
+- produkcyjny first-owner flow musi uzywac `PLATFORM_SETUP_TOKEN` i `/setup` w dashboardzie,
+- `BOOTSTRAP_PLATFORM_OWNER_EMAIL` jest tylko development/test-only; `NODE_ENV=production` z ta zmienna odmawia startu,
 - user z emailem rownym `BOOTSTRAP_PLATFORM_OWNER_EMAIL` moze nadal dostac idempotentnie role `platform_owner` i status `active` w dev/legacy flow.
 
 W produkcji cookies Better Auth maja dzialac jako secure httpOnly session cookies. Dla subdomen ustaw `COOKIE_DOMAIN=.poza-nuta.pl`; lokalnie `COOKIE_DOMAIN=localhost` albo puste ustawienie pozwala testowac dev flow.
@@ -291,6 +292,7 @@ pnpm smoke:api
 ## Legacy lokalne API karaoke
 
 Ta sekcja opisuje prototypowe API na `node:http`, ktore zostaje tylko jako material referencyjny i kompatybilny runtime dla starego Vite MVP. Nie jest docelowym backendem platformy venue-first.
+Legacy API nie jest production deployment target, chyba ze zostanie jawnie zabezpieczone. W `NODE_ENV=production` wymagane jest `API_ADMIN_TOKEN`; bez niego legacy API odmawia startu, a brak albo zly bearer token na endpointach operatorskich zwraca `401`.
 
 API jest lokalnym, dev-first mostem pod przyszly frontend, QR i panel operatora. Dziala wylacznie na lokalnych JSON-ach: `data/imports/ising-songs.json` oraz `data/events/*.json`. API nie odpytuje iSing podczas wyszukiwania ani operacji kolejki.
 
@@ -313,6 +315,7 @@ Domyslnie serwer binduje do `127.0.0.1:4321`. Konfiguracja:
 ```env
 API_HOST=127.0.0.1
 API_PORT=4321
+# Required when NODE_ENV=production for legacy API.
 API_ADMIN_TOKEN=
 API_LOG_LEVEL=info
 ```
@@ -333,7 +336,7 @@ Get-NetTCPConnection -LocalPort 4321
 Stop-Process -Id <PID> -Force
 ```
 
-Jesli `API_ADMIN_TOKEN` jest ustawiony, endpointy operatorskie wymagaja naglowka `Authorization: Bearer <token>`. Publiczne endpointy i endpoint zgloszenia requestu uczestnika nie wymagaja tokena.
+Jesli `API_ADMIN_TOKEN` jest ustawiony, endpointy operatorskie wymagaja naglowka `Authorization: Bearer <token>`. W `NODE_ENV=production` token jest wymagany dla legacy API. Publiczne endpointy i endpoint zgloszenia requestu uczestnika nie wymagaja tokena.
 
 Health check:
 

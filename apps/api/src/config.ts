@@ -138,6 +138,10 @@ function validateProductionConfig(config: ApiConfig, raw: ProductionEnvInputs): 
   validateOauthValue(config.googleClientId, "GOOGLE_CLIENT_ID", errors)
   validateOauthValue(config.googleClientSecret, "GOOGLE_CLIENT_SECRET", errors)
 
+  if (config.bootstrapPlatformOwnerEmail !== undefined) {
+    errors.push("BOOTSTRAP_PLATFORM_OWNER_EMAIL is development/test-only and must not be set in production; use PLATFORM_SETUP_TOKEN")
+  }
+
   if (config.platformSetupEnabled) {
     requirePresent(raw.platformSetupToken, "PLATFORM_SETUP_TOKEN", errors)
     if (config.platformSetupToken !== undefined) {
