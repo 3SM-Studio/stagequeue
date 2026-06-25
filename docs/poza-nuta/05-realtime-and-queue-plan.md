@@ -68,6 +68,8 @@ Redis Pub/Sub EventBus for multi-instance API fanout
 
 SSE fanout is best-effort Pub/Sub. There is no replay, durable delivery or event sourcing in this phase. If Redis is unavailable, live updates/SSE fanout can be delayed or missing, but queue mutations still use the normal HTTP and database path and must not change their domain semantics because realtime delivery failed.
 
+The same `REDIS_URL` also selects Redis-backed infrastructure rate limiting in production. Without `REDIS_URL`, development/test may use the in-memory limiter for single-process runs. Redis rate limiting is fixed-window best-effort abuse protection, not durable quota accounting. If Redis is unavailable in production, protected requests fail closed with a controlled API error instead of silently falling back to in-memory. Participant cooldown and max-active request rules remain domain limits in the queue service, separate from the IP/route rate limiter.
+
 Phase 3:
 
 ```txt

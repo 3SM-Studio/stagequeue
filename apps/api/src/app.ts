@@ -9,7 +9,7 @@ import { registerCors } from "./plugins/cors.ts"
 import { type DbResources, registerDb } from "./plugins/db.ts"
 import { type DomainEventBus, registerEventBus } from "./plugins/eventBus.ts"
 import { registerPermissions } from "./plugins/permissions.ts"
-import { registerRateLimit } from "./plugins/rateLimit.ts"
+import { registerRateLimit, type RateLimitOptions } from "./plugins/rateLimit.ts"
 import { registerRequestId } from "./plugins/requestId.ts"
 import { registerSse } from "./plugins/sse.ts"
 import { registerDashboardRoutes } from "./routes/dashboard.ts"
@@ -29,6 +29,7 @@ export type CreateApiAppOptions = {
   currentUserResolver?: CurrentUserResolver
   permissions?: PermissionService
   eventBus?: DomainEventBus
+  rateLimit?: RateLimitOptions
   services?: Partial<ApiModuleServices>
   logger?: NonNullable<FastifyServerOptions["logger"]>
 }
@@ -58,7 +59,7 @@ export async function createApiApp(options: CreateApiAppOptions = {}): Promise<F
   await registerModuleServices(app, options.services)
   await registerCors(app, config)
   await registerCookies(app)
-  await registerRateLimit(app)
+  await registerRateLimit(app, config, options.rateLimit)
   await registerAuth(app, config, options.auth)
 
   await registerHealthRoutes(app, config)

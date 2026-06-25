@@ -31,6 +31,8 @@ const USER_ID = "11111111-1111-4111-8111-111111111111"
 const VENUE_ID = "22222222-2222-4222-8222-222222222222"
 const ACTIVE_EVENT_ID = "33333333-3333-4333-8333-333333333333"
 const ACTIVE_EVENT_PUBLIC_ID = "ka2Md-d1das"
+const SECOND_ACTIVE_EVENT_ID = "99999999-9999-4999-8999-999999999999"
+const SECOND_ACTIVE_EVENT_PUBLIC_ID = "secondActive1"
 const PAUSED_EVENT_ID = "44444444-4444-4444-8444-444444444444"
 const PAUSED_EVENT_PUBLIC_ID = "pausedEvent1"
 const SCHEDULED_EVENT_ID = "55555555-5555-4555-8555-555555555555"
@@ -84,6 +86,74 @@ test("public submit rate limit allows first requests and blocks the sixth for th
     assert.equal(queue.state.requests.length, 5)
   } finally {
     await app.close()
+  }
+})
+
+test("public submit rate limit scopes keys by event and venue", async () => {
+  const queue = createInMemoryQueueService()
+  queue.state.events.set(SECOND_ACTIVE_EVENT_ID, {
+    id: SECOND_ACTIVE_EVENT_ID,
+    publicId: SECOND_ACTIVE_EVENT_PUBLIC_ID,
+    name: "Second Active Event",
+    status: "active"
+  })
+  const app = await createTestApp({ queue })
+  try {
+    for (let index = 0; index < 5; index += 1) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+        payload: publicSubmitPayload(`Singer ${index + 1}`, `Event Song ${index + 1}`)
+      })
+      assert.equal(response.statusCode, 201)
+    }
+
+    const sameEventBlocked = await app.inject({
+      method: "POST",
+      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+      payload: publicSubmitPayload("Singer 6", "Blocked Song")
+    })
+    const otherEventAllowed = await app.inject({
+      method: "POST",
+      url: `/public/events/${SECOND_ACTIVE_EVENT_PUBLIC_ID}/requests`,
+      payload: publicSubmitPayload("Singer 7", "Other Event Song")
+    })
+
+    assert.equal(sameEventBlocked.statusCode, 429)
+    assert.equal(sameEventBlocked.json().error.message, "Too many public song requests. Please try again later.")
+    assert.equal(otherEventAllowed.statusCode, 201)
+  } finally {
+    await app.close()
+  }
+
+  const venueQueue = createInMemoryQueueService()
+  const venueApp = await createTestApp({ queue: venueQueue })
+  try {
+    for (let index = 0; index < 5; index += 1) {
+      const response = await venueApp.inject({
+        method: "POST",
+        url: "/public/venues/klub-x/requests",
+        payload: publicSubmitPayload(`Venue Singer ${index + 1}`, `Venue Song ${index + 1}`)
+      })
+      assert.equal(response.statusCode, 201)
+    }
+
+    const sameVenueBlocked = await venueApp.inject({
+      method: "POST",
+      url: "/public/venues/klub-x/requests",
+      payload: publicSubmitPayload("Venue Singer 6", "Blocked Venue Song")
+    })
+    const otherVenueAllowed = await venueApp.inject({
+      method: "POST",
+      url: "/public/venues/klub-y/requests",
+      payload: publicSubmitPayload("Venue Singer 7", "Other Venue Song")
+    })
+
+    assert.equal(sameVenueBlocked.statusCode, 429)
+    assert.equal(sameVenueBlocked.json().error.message, "Too many public song requests. Please try again later.")
+    assert.equal(otherVenueAllowed.statusCode, 201)
+  } finally {
+    await venueApp.close()
   }
 })
 
@@ -2274,6 +2344,7 @@ function fakeEventsService(options: { lookup?: PublicActiveEventLookup | null } 
 function findPublicEventResolution(eventPublicId: string) {
   const events = [
     { id: ACTIVE_EVENT_ID, publicId: ACTIVE_EVENT_PUBLIC_ID, status: "active" },
+    { id: SECOND_ACTIVE_EVENT_ID, publicId: SECOND_ACTIVE_EVENT_PUBLIC_ID, status: "active" },
     { id: PAUSED_EVENT_ID, publicId: PAUSED_EVENT_PUBLIC_ID, status: "paused" },
     { id: SCHEDULED_EVENT_ID, publicId: SCHEDULED_EVENT_PUBLIC_ID, status: "scheduled" },
     { id: CLOSED_EVENT_ID, publicId: CLOSED_EVENT_PUBLIC_ID, status: "closed" }

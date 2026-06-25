@@ -216,7 +216,7 @@ curl http://127.0.0.1:4321/dashboard
 curl http://127.0.0.1:4321/platform
 ```
 
-`/health` sprawdza polaczenie z baza. Pozostale grupy tras sa placeholderami pod kolejne fazy. CORS jest allowlistowany do `PUBLIC_WEB_URL` i `DASHBOARD_WEB_URL`, cookies sa wlaczone pod przyszle sesje, a globalny rate limit dziala bez Redis.
+`/health` sprawdza polaczenie z baza. Pozostale grupy tras sa placeholderami pod kolejne fazy. CORS jest allowlistowany do `PUBLIC_WEB_URL` i `DASHBOARD_WEB_URL`, cookies sa wlaczone pod przyszle sesje, a w development/test globalny rate limit moze dzialac in-memory.
 
 ### Auth i closed beta
 
@@ -255,11 +255,13 @@ Better Auth zapisuje swoje dane w tabelach `auth_users`, `auth_sessions`, `auth_
 
 W produkcji cookies Better Auth maja dzialac jako secure httpOnly session cookies. Dla subdomen ustaw `COOKIE_DOMAIN=.poza-nuta.pl`; lokalnie `COOKIE_DOMAIN=localhost` albo puste ustawienie pozwala testowac dev flow.
 
-### SSE EventBus i Redis
+### Redis, SSE EventBus i rate limiting
 
-Fastify API wybiera EventBus na podstawie konfiguracji. Bez `REDIS_URL` w development/test dziala adapter in-memory, dobry tylko dla dev, testow i pojedynczej instancji procesu. Gdy `REDIS_URL` jest ustawione, API uzywa Redis Pub/Sub jako backendu EventBus. W `NODE_ENV=production` `REDIS_URL` jest wymagane przez walidacje konfiguracji, zeby multi-instance SSE fanout nie polegal na pamieci jednego procesu.
+Fastify API wybiera EventBus i infrastrukturalny rate limiter na podstawie konfiguracji. Bez `REDIS_URL` w development/test dzialaja adaptery in-memory, dobre tylko dla dev, testow i pojedynczej instancji procesu. Gdy `REDIS_URL` jest ustawione, API uzywa Redis Pub/Sub jako backendu EventBus oraz Redis-backed fixed-window rate limit dla abuse-prone HTTP routes. W `NODE_ENV=production` `REDIS_URL` jest wymagane przez walidacje konfiguracji, zeby multi-instance SSE fanout i rate limiting nie polegaly na pamieci jednego procesu.
 
 SSE pozostaje kanalem best-effort: Redis Pub/Sub rozsyla nowe eventy, ale nie zapewnia replay ani gwarantowanego dostarczenia po rozlaczeniu klienta. Awaria Redis oznacza problemy z live update/SSE fanout; mutacje kolejki dalej wykonuja zwykle HTTP/DB flow i nie powinny zmieniac semantyki przez sam brak realtime. UI powinno dalej traktowac SSE jako niekrytyczne i uzywac istniejacych refetch/polling fallbackow.
+
+Redis-backed rate limiting jest best-effort abuse protection, nie perfekcyjnym systemem quota ani durable counter store. Awaria Redis w production powoduje fail-closed dla chronionego requestu przez kontrolowany blad API; nie ma cichego fallbacku do in-memory w production. Domenowe limity uczestnika, takie jak `PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT` i `PUBLIC_REQUEST_COOLDOWN_SECONDS`, pozostaja osobnymi regulami queue service i nie sa tym samym co infrastrukturalny IP/route rate limiter.
 
 ### Platform setup / first owner
 
