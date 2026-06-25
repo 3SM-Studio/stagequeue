@@ -25,7 +25,7 @@ if (!databaseUrl) {
 
 const { db, pool } = createDbClient(databaseUrl)
 const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`
-const c18bCheckConstraintNames = [
+const expectedCheckConstraintNames = [
   "users_status_check",
   "platform_memberships_role_check",
   "platform_memberships_status_check",
@@ -41,7 +41,13 @@ const c18bCheckConstraintNames = [
   "event_staff_assignments_status_check",
   "song_requests_status_check",
   "access_requests_status_check",
-  "access_requests_venue_access_role_check"
+  "access_requests_venue_access_role_check",
+  "organizations_type_check",
+  "organizations_status_check",
+  "song_sources_status_check",
+  "catalog_import_runs_status_check",
+  "catalog_import_logs_level_check",
+  "jobs_status_check"
 ] as const
 const createdIds: {
   userId?: string
@@ -212,12 +218,12 @@ async function assertC18bCheckConstraintsExist(): Promise<void> {
         and c.convalidated = true
         and c.conname = any($1::text[])
     `,
-    [[...c18bCheckConstraintNames]]
+    [[...expectedCheckConstraintNames]]
   )
   const found = new Set(result.rows.map((row) => row.constraint_name))
-  const missing = c18bCheckConstraintNames.filter((constraintName) => !found.has(constraintName))
+  const missing = expectedCheckConstraintNames.filter((constraintName) => !found.has(constraintName))
 
-  assert.deepEqual(missing, [], "C18b CHECK constraints should exist and be validated")
+  assert.deepEqual(missing, [], "Expected CHECK constraints should exist and be validated")
 }
 
 async function cleanupCreatedRows(): Promise<void> {

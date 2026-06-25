@@ -167,14 +167,27 @@ export const platformMemberships = pgTable(
   ]
 )
 
-export const organizations = pgTable("organizations", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  slug: text("slug").notNull().unique(),
-  name: text("name").notNull(),
-  type: text("type").notNull().default("karaoke_company"),
-  status: text("status").notNull().default("pending"),
-  ...timestamps
-})
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    type: text("type").notNull().default("karaoke_company"),
+    status: text("status").notNull().default("pending"),
+    ...timestamps
+  },
+  (table) => [
+    check(
+      "organizations_type_check",
+      sql`${table.type} in ('venue_owner', 'karaoke_company', 'agency', 'independent_host', 'platform')`
+    ),
+    check(
+      "organizations_status_check",
+      sql`${table.status} in ('pending', 'active', 'suspended', 'archived', 'disabled')`
+    )
+  ]
+)
 
 export const organizationMemberships = pgTable(
   "organization_memberships",
@@ -395,12 +408,16 @@ export const eventStaffAssignments = pgTable(
   ]
 )
 
-export const songSources = pgTable("song_sources", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  status: text("status").notNull().default("active"),
-  ...timestamps
-})
+export const songSources = pgTable(
+  "song_sources",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    status: text("status").notNull().default("active"),
+    ...timestamps
+  },
+  (table) => [check("song_sources_status_check", sql`${table.status} in ('active', 'disabled')`)]
+)
 
 export const songSourceTracks = pgTable(
   "song_source_tracks",
@@ -532,7 +549,11 @@ export const catalogImportRuns = pgTable(
     uniqueIndex("catalog_import_runs_one_queued_or_running_per_source_unique")
       .on(table.sourceId)
       .where(sql`${table.status} in ('queued', 'running')`),
-    index("catalog_import_runs_source_status_idx").on(table.sourceId, table.status)
+    index("catalog_import_runs_source_status_idx").on(table.sourceId, table.status),
+    check(
+      "catalog_import_runs_status_check",
+      sql`${table.status} in ('queued', 'running', 'succeeded', 'failed', 'cancelled')`
+    )
   ]
 )
 
@@ -548,7 +569,10 @@ export const catalogImportLogs = pgTable(
     payload: jsonb("payload"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
-  (table) => [index("catalog_import_logs_import_run_created_at_idx").on(table.importRunId, table.createdAt)]
+  (table) => [
+    index("catalog_import_logs_import_run_created_at_idx").on(table.importRunId, table.createdAt),
+    check("catalog_import_logs_level_check", sql`${table.level} in ('info', 'warn', 'error')`)
+  ]
 )
 
 export const accessRequests = pgTable(
@@ -596,6 +620,10 @@ export const jobs = pgTable(
   },
   (table) => [
     index("jobs_status_run_at_idx").on(table.status, table.runAt),
-    index("jobs_type_status_idx").on(table.type, table.status)
+    index("jobs_type_status_idx").on(table.type, table.status),
+    check(
+      "jobs_status_check",
+      sql`${table.status} in ('queued', 'running', 'succeeded', 'failed', 'cancelled')`
+    )
   ]
 )

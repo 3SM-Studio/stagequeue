@@ -18,9 +18,11 @@ type Snapshot = {
 }
 
 const migrationSource = readFileSync("packages/db/drizzle/0010_even_prodigy.sql", "utf8")
+const c18cMigrationSource = readFileSync("packages/db/drizzle/0011_aberrant_tyger_tiger.sql", "utf8")
 const schemaSource = readFileSync("packages/db/src/schema.ts", "utf8")
 const ciSmokeSource = readFileSync("apps/api/scripts/ci-db-migration-smoke.ts", "utf8")
 const snapshot = JSON.parse(readFileSync("packages/db/drizzle/meta/0010_snapshot.json", "utf8")) as Snapshot
+const c18cSnapshot = JSON.parse(readFileSync("packages/db/drizzle/meta/0011_snapshot.json", "utf8")) as Snapshot
 
 const c18bCheckConstraints = [
   {
@@ -137,6 +139,51 @@ const c18bCheckConstraints = [
   }
 ] as const
 
+const c18cCheckConstraints = [
+  {
+    table: "organizations",
+    column: "type",
+    name: "organizations_type_check",
+    allowed: ["venue_owner", "karaoke_company", "agency", "independent_host", "platform"],
+    invalid: "venue"
+  },
+  {
+    table: "organizations",
+    column: "status",
+    name: "organizations_status_check",
+    allowed: ["pending", "active", "suspended", "archived", "disabled"],
+    invalid: "deleted"
+  },
+  {
+    table: "song_sources",
+    column: "status",
+    name: "song_sources_status_check",
+    allowed: ["active", "disabled"],
+    invalid: "archived"
+  },
+  {
+    table: "catalog_import_runs",
+    column: "status",
+    name: "catalog_import_runs_status_check",
+    allowed: ["queued", "running", "succeeded", "failed", "cancelled"],
+    invalid: "pending"
+  },
+  {
+    table: "catalog_import_logs",
+    column: "level",
+    name: "catalog_import_logs_level_check",
+    allowed: ["info", "warn", "error"],
+    invalid: "debug"
+  },
+  {
+    table: "jobs",
+    column: "status",
+    name: "jobs_status_check",
+    allowed: ["queued", "running", "succeeded", "failed", "cancelled"],
+    invalid: "pending"
+  }
+] as const
+
 test("C18b core state CHECK constraints exist in schema and Drizzle snapshot", () => {
   for (const constraint of c18bCheckConstraints) {
     const snapshotCheck = snapshot.tables[`public.${constraint.table}`]?.checkConstraints?.[constraint.name]
@@ -200,10 +247,64 @@ test("C18b migration leaves explicitly deferred enum candidates out of scope", (
   assert.doesNotMatch(migrationSource, /(provider|source).*check/i)
 })
 
-test("CI DB smoke verifies C18b CHECK constraints through pg_constraint", () => {
+test("C18c secondary state CHECK constraints exist in schema and Drizzle snapshot", () => {
+  for (const constraint of c18cCheckConstraints) {
+    const snapshotCheck = c18cSnapshot.tables[`public.${constraint.table}`]?.checkConstraints?.[constraint.name]
+
+    assert.match(schemaSource, new RegExp(`"${constraint.name}"`))
+    assert.ok(snapshotCheck, `${constraint.name} should be present in the Drizzle snapshot`)
+    assert.equal(snapshotCheck.name, constraint.name)
+    assert.equal(snapshotCheck.value, checkExpression(constraint))
+  }
+})
+
+test("C18c migration adds and validates secondary CHECK constraints", () => {
+  for (const constraint of c18cCheckConstraints) {
+    assert.ok(
+      c18cMigrationSource.includes(
+        `ALTER TABLE "${constraint.table}" ADD CONSTRAINT "${constraint.name}" CHECK (${checkExpression(
+          constraint
+        )}) NOT VALID;`
+      ),
+      `${constraint.name} should be added as NOT VALID`
+    )
+    assert.ok(
+      c18cMigrationSource.includes(`ALTER TABLE "${constraint.table}" VALIDATE CONSTRAINT "${constraint.name}";`),
+      `${constraint.name} should be validated after being added`
+    )
+  }
+})
+
+test("C18c representative invalid values are outside CHECK allow-lists", () => {
+  for (const constraint of c18cCheckConstraints) {
+    const invalidInsert = `insert into ${constraint.table} (${constraint.column}) values ('${constraint.invalid}')`
+    assert.equal(
+      (constraint.allowed as readonly string[]).includes(constraint.invalid),
+      false,
+      `${invalidInsert} should violate ${constraint.name}`
+    )
+    assert.doesNotMatch(checkExpression(constraint), new RegExp(`'${constraint.invalid}'`))
+  }
+})
+
+test("C18c migration leaves explicitly excluded dynamic candidates out of scope", () => {
+  assert.doesNotMatch(schemaSource, /pgEnum/)
+  assert.doesNotMatch(c18cMigrationSource, /queue_events_.*_(type|actor_kind)_check/)
+  assert.doesNotMatch(c18cMigrationSource, /jobs_type_check/)
+  assert.doesNotMatch(c18cMigrationSource, /auth_accounts_provider_id_check/)
+  assert.doesNotMatch(c18cMigrationSource, /song_sources_id_check/)
+  assert.doesNotMatch(c18cMigrationSource, /song_source_tracks_availability_status_check/)
+  assert.doesNotMatch(c18cMigrationSource, /payload.*check/i)
+  assert.doesNotMatch(c18cMigrationSource, /provider.*check/i)
+})
+
+test("CI DB smoke verifies CHECK constraints through pg_constraint", () => {
   assert.match(ciSmokeSource, /pg_constraint/)
   assert.match(ciSmokeSource, /convalidated = true/)
-  assert.match(ciSmokeSource, /C18b CHECK constraints should exist and be validated/)
+  assert.match(ciSmokeSource, /Expected CHECK constraints should exist and be validated/)
+  for (const constraint of [...c18bCheckConstraints, ...c18cCheckConstraints]) {
+    assert.match(ciSmokeSource, new RegExp(`"${constraint.name}"`))
+  }
 })
 
 function checkExpression(constraint: {

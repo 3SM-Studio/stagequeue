@@ -107,6 +107,38 @@ where venue_access_role not in ('owner', 'manager', 'event_creator', 'karaoke_op
 
 Jesli dowolny licznik jest wiekszy niz `0`, zatrzymaj migracje i przygotuj jawny data cleanup/backfill. Kazda obca wartosc zablokuje `VALIDATE CONSTRAINT`; nie omijaj constraintow przez reczna edycje migracji ani nie naprawiaj danych bez aktualnego backupu.
 
+### C18c CHECK constraints pre-check
+
+Przed migracja `0011_aberrant_tyger_tiger.sql` uruchom ponizszy pre-check na docelowej bazie staging albo production. Wynik powinien miec `invalid_count = 0` dla kazdego wiersza. Zapytanie nie modyfikuje danych.
+
+```sql
+select 'organizations.type' as column_name, count(*) as invalid_count
+from organizations
+where type not in ('venue_owner', 'karaoke_company', 'agency', 'independent_host', 'platform')
+union all
+select 'organizations.status', count(*)
+from organizations
+where status not in ('pending', 'active', 'suspended', 'archived', 'disabled')
+union all
+select 'song_sources.status', count(*)
+from song_sources
+where status not in ('active', 'disabled')
+union all
+select 'catalog_import_runs.status', count(*)
+from catalog_import_runs
+where status not in ('queued', 'running', 'succeeded', 'failed', 'cancelled')
+union all
+select 'catalog_import_logs.level', count(*)
+from catalog_import_logs
+where level not in ('info', 'warn', 'error')
+union all
+select 'jobs.status', count(*)
+from jobs
+where status not in ('queued', 'running', 'succeeded', 'failed', 'cancelled');
+```
+
+Jesli dowolny licznik jest wiekszy niz `0`, zatrzymaj migracje i przygotuj jawny data cleanup/backfill. Kazda obca wartosc zablokuje `VALIDATE CONSTRAINT`; nie omijaj constraintow przez reczna edycje migracji ani nie naprawiaj danych bez aktualnego backupu.
+
 ## 3. Backup checklist
 
 Przed migracja wykonaj minimum jeden backup produkcyjnej bazy:
