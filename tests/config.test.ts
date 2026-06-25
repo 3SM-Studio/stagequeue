@@ -54,6 +54,46 @@ test("production config rejects localhost and non-https app URLs", () => {
   )
 })
 
+test("production config fails without Redis URL", () => {
+  assert.throws(
+    () =>
+      parseApiConfig({
+        ...validProductionEnv(),
+        REDIS_URL: undefined
+      }),
+    (error) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /Invalid production configuration/)
+      assert.match(error.message, /REDIS_URL is required in production/)
+      return true
+    }
+  )
+})
+
+test("production config rejects invalid Redis URL protocol", () => {
+  assert.throws(
+    () =>
+      parseApiConfig({
+        ...validProductionEnv(),
+        REDIS_URL: "http://redis.internal:6379"
+      }),
+    (error) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /REDIS_URL must use redis or rediss protocol in production/)
+      return true
+    }
+  )
+})
+
+test("production config accepts localhost Redis URL", () => {
+  const config = parseApiConfig({
+    ...validProductionEnv(),
+    REDIS_URL: "redis://localhost:6379"
+  })
+
+  assert.equal(config.redisUrl, "redis://localhost:6379")
+})
+
 test("development config keeps local defaults", () => {
   const config = parseApiConfig({ NODE_ENV: "development" })
 
@@ -182,6 +222,7 @@ function validProductionEnv(): Record<string, string> {
     PUBLIC_WEB_URL: "https://poza-nuta.example",
     DASHBOARD_WEB_URL: "https://dashboard.poza-nuta.example",
     DATABASE_URL: "postgres://poza_nuta:strong-password@db.internal:5432/poza_nuta",
+    REDIS_URL: "redis://redis.internal:6379",
     AUTH_SECRET: "prod_auth_secret_32_characters_min",
     PARTICIPANT_TOKEN_SECRET: "prod_participant_secret_32_chars",
     GOOGLE_CLIENT_ID: "google-client-id.apps.googleusercontent.com",

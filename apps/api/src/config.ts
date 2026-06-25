@@ -11,6 +11,7 @@ export type ApiConfig = {
   dashboardWebUrl: string
   cookieDomain?: string
   databaseUrl: string
+  redisUrl?: string
   authSecret: string
   googleClientId: string
   googleClientSecret: string
@@ -39,6 +40,7 @@ export function parseApiConfig(env: Record<string, string | undefined>): ApiConf
   const publicWebUrl = readText(env.PUBLIC_WEB_URL) ?? "http://localhost:3000"
   const dashboardWebUrl = readText(env.DASHBOARD_WEB_URL) ?? "http://localhost:3001"
   const databaseUrl = readText(env.DATABASE_URL) ?? (nodeEnv === "production" ? undefined : LOCAL_DATABASE_URL)
+  const redisUrl = readText(env.REDIS_URL)
   const authSecret = readText(env.AUTH_SECRET) ?? (nodeEnv === "production" ? undefined : LOCAL_AUTH_SECRET)
   const googleClientId = readText(env.GOOGLE_CLIENT_ID) ?? (nodeEnv === "production" ? undefined : "replace_me")
   const googleClientSecret = readText(env.GOOGLE_CLIENT_SECRET) ?? (nodeEnv === "production" ? undefined : "replace_me")
@@ -78,6 +80,9 @@ export function parseApiConfig(env: Record<string, string | undefined>): ApiConf
   if (cookieDomain !== undefined) {
     config.cookieDomain = cookieDomain
   }
+  if (redisUrl !== undefined) {
+    config.redisUrl = redisUrl
+  }
   const bootstrapPlatformOwnerEmail = readText(env.BOOTSTRAP_PLATFORM_OWNER_EMAIL)?.toLowerCase()
   if (bootstrapPlatformOwnerEmail !== undefined) {
     config.bootstrapPlatformOwnerEmail = bootstrapPlatformOwnerEmail
@@ -96,6 +101,7 @@ export function parseApiConfig(env: Record<string, string | undefined>): ApiConf
     apiUrl: env.API_URL,
     publicWebUrl: env.PUBLIC_WEB_URL,
     dashboardWebUrl: env.DASHBOARD_WEB_URL,
+    redisUrl: env.REDIS_URL,
     platformSetupToken: env.PLATFORM_SETUP_TOKEN
   })
 
@@ -111,6 +117,7 @@ type ProductionEnvInputs = {
   apiUrl: string | undefined
   publicWebUrl: string | undefined
   dashboardWebUrl: string | undefined
+  redisUrl: string | undefined
   platformSetupToken: string | undefined
 }
 
@@ -128,8 +135,12 @@ function validateProductionConfig(config: ApiConfig, raw: ProductionEnvInputs): 
   requirePresent(raw.apiUrl, "API_URL", errors)
   requirePresent(raw.publicWebUrl, "PUBLIC_WEB_URL", errors)
   requirePresent(raw.dashboardWebUrl, "DASHBOARD_WEB_URL", errors)
+  requirePresent(raw.redisUrl, "REDIS_URL", errors)
 
   validateDatabaseUrl(config.databaseUrl, "DATABASE_URL", errors)
+  if (config.redisUrl !== undefined) {
+    validateRedisUrl(config.redisUrl, "REDIS_URL", errors)
+  }
   validatePublicBaseUrl(config.apiUrl, "API_URL", errors)
   validatePublicBaseUrl(config.publicWebUrl, "PUBLIC_WEB_URL", errors)
   validatePublicBaseUrl(config.dashboardWebUrl, "DASHBOARD_WEB_URL", errors)
@@ -189,6 +200,16 @@ function validateDatabaseUrl(value: string, name: string, errors: string[]): voi
   }
   if (isLocalHostname(url.hostname)) {
     errors.push(`${name} must not point to localhost in production`)
+  }
+}
+
+function validateRedisUrl(value: string, name: string, errors: string[]): void {
+  const url = parseUrl(value, name, errors)
+  if (!url) {
+    return
+  }
+  if (url.protocol !== "redis:" && url.protocol !== "rediss:") {
+    errors.push(`${name} must use redis or rediss protocol in production`)
   }
 }
 

@@ -54,7 +54,7 @@ export async function createApiApp(options: CreateApiAppOptions = {}): Promise<F
   await registerDb(app, config, options.db)
   await registerPermissions(app, options.permissions)
   await registerSse(app)
-  await registerEventBus(app, options.eventBus)
+  await registerEventBus(app, config, options.eventBus)
   await registerModuleServices(app, options.services)
   await registerCors(app, config)
   await registerCookies(app)
