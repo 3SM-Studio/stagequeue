@@ -35,11 +35,16 @@ export type RedisRateLimitClient = {
 
 export type RateLimitOptions = {
   createRedisClient?: (url: string) => RedisRateLimitClient
+  onError?: (error: unknown, context: RedisRateLimitErrorContext) => void
 }
 
 export type RedisRateLimitResources = {
   store: FastifyRateLimitStoreCtor
   close(): Promise<void>
+}
+
+export type RedisRateLimitErrorContext = {
+  operation: "increment" | "close"
 }
 
 const REDIS_RATE_LIMIT_SCRIPT = `
@@ -70,7 +75,22 @@ export async function registerRateLimit(
   config: ApiConfig,
   options: RateLimitOptions = {}
 ): Promise<void> {
-  const redisResources = config.redisUrl ? createRedisRateLimitResources(config.redisUrl, options) : undefined
+  const redisResources = config.redisUrl
+    ? createRedisRateLimitResources(config.redisUrl, {
+        ...options,
+        onError: (error, context) => {
+          options.onError?.(error, context)
+          app.log.error(
+            {
+              event: "redis_rate_limit_error",
+              operation: context.operation,
+              ...toSafeErrorFields(error, [config.redisUrl ?? ""])
+            },
+            "Redis rate limit error"
+          )
+        }
+      })
+    : undefined
   await app.register(rateLimit, {
     global: true,
     max: 300,
@@ -110,7 +130,10 @@ export function createRedisRateLimitResources(redisUrl: string, options: RateLim
     incr(key: string, callback: RateLimitCallback, timeWindow = 60_000, max = 1): void {
       void this.increment(key, timeWindow, max).then(
         (result) => callback(null, result),
-        (error: unknown) => callback(error instanceof Error ? error : new Error("Redis rate limit failed"))
+        (error: unknown) => {
+          options.onError?.(error, { operation: "increment" })
+          callback(new Error("Redis rate limit failed"))
+        }
       )
     }
 
@@ -145,14 +168,19 @@ export function createRedisRateLimitResources(redisUrl: string, options: RateLim
     store: RedisRateLimitStore,
     async close() {
       closePromise ??= (async () => {
-        if (client.close) {
-          await client.close()
-        } else {
-          await client.quit?.()
+        try {
+          if (client.close) {
+            await client.close()
+          } else {
+            await client.quit?.()
+          }
+        } catch (error) {
+          options.onError?.(error, { operation: "close" })
         }
         try {
           client.destroy?.()
-        } catch {
+        } catch (error) {
+          options.onError?.(error, { operation: "close" })
           // @redis/client may reject destroy after a graceful close; app.close() should remain safe.
         }
       })()
@@ -188,4 +216,37 @@ function readStoreOptions(value: unknown): FastifyRateLimitStoreOptions {
     }
   }
   return options
+}
+
+function toSafeErrorFields(error: unknown, redactedValues: string[] = []): { errorName: string; errorMessage: string; errorCode?: string } {
+  if (error instanceof Error) {
+    return {
+      errorName: error.name,
+      errorMessage: sanitizeErrorMessage(error.message, redactedValues),
+      ...readErrorCode(error)
+    }
+  }
+
+  return {
+    errorName: "Error",
+    errorMessage: sanitizeErrorMessage(String(error), redactedValues)
+  }
+}
+
+function readErrorCode(error: Error): { errorCode?: string } {
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" ? { errorCode: code } : {}
+}
+
+function sanitizeErrorMessage(message: string, redactedValues: string[]): string {
+  let sanitized = message
+  for (const value of redactedValues) {
+    if (value) {
+      sanitized = sanitized.split(value).join("[redacted]")
+    }
+  }
+  return sanitized
+    .replace(/rediss?:\/\/\S+/gi, "[redacted]")
+    .replace(/stagequeue:rate-limit:[^\s"']+/gi, "[redacted-key]")
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, "[redacted-ip]")
 }

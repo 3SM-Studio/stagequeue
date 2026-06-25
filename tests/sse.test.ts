@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import type { AddressInfo } from "node:net"
 import test from "node:test"
-import { createApiApp, type CreateApiAppOptions } from "../apps/api/src/app.ts"
+import { createApiApp, createLoggerConfig, type CreateApiAppOptions } from "../apps/api/src/app.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { createEventsService, type EventSummary } from "../apps/api/src/modules/events/service.ts"
 import { createQueueService, type QueueSongRequest } from "../apps/api/src/modules/queue/service.ts"
@@ -51,6 +51,53 @@ test("public stream endpoint returns text/event-stream and cleans up subscriber 
     controller.abort()
     await app.close()
   }
+})
+
+test("public stream lifecycle logs open and close without changing connected event", async () => {
+  const lines: string[] = []
+  const config = testConfig({ logLevel: "debug", nodeEnv: "development" })
+  const app = await createTestApp({
+    config,
+    logger: captureLogger(config, lines)
+  })
+  await app.listen({ host: "127.0.0.1", port: 0 })
+  const port = (app.server.address() as AddressInfo).port
+  const controller = new AbortController()
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/public/events/${EVENT_PUBLIC_ID}/stream`, {
+      headers: {
+        Cookie: "pn_participant=participant-token-secret",
+        Origin: "http://localhost:3000"
+      },
+      signal: controller.signal
+    })
+    const firstChunk = await readFirstChunk(response)
+
+    assert.equal(response.status, 200)
+    assertAllowedSseCors(response, "http://localhost:3000")
+    assert.match(firstChunk, /^event: connected/m)
+    assert.match(firstChunk, /"scope":"public\.event"/)
+
+    controller.abort()
+    await waitFor(() => lines.some((line) => line.includes("sse_stream_close")))
+  } finally {
+    controller.abort()
+    await app.close()
+  }
+
+  const openLog = parseLogLine(lines.find((line) => line.includes("sse_stream_open")) ?? "")
+  const closeLog = parseLogLine(lines.find((line) => line.includes("sse_stream_close")) ?? "")
+  const allLogs = lines.join("")
+  assert.equal(openLog.event, "sse_stream_open")
+  assert.equal(openLog.operation, "open")
+  assert.equal(openLog.scope, "public.event")
+  assert.equal(openLog.eventPublicId, EVENT_PUBLIC_ID)
+  assert.equal(closeLog.event, "sse_stream_close")
+  assert.equal(closeLog.operation, "close")
+  assert.equal(typeof closeLog.durationMs, "number")
+  assert.equal(allLogs.includes("queue.updated"), false)
+  assert.equal(allLogs.includes("participant-token-secret"), false)
+  assert.equal(allLogs.includes("pn_participant"), false)
 })
 
 test("venue-first public stream resolves active event and returns text/event-stream", async () => {
@@ -403,9 +450,11 @@ test("platform catalog import stream requires platform catalog permission", asyn
 
 async function createTestApp(options: {
   authenticated?: boolean
+  config?: ApiConfig
   permissions?: PermissionService
   eventBus?: DomainEventBus
   event?: EventSummary | null
+  logger?: CreateApiAppOptions["logger"]
   publicContext?: {
     venueStatus?: string
     venueVerificationStatus?: string
@@ -413,7 +462,7 @@ async function createTestApp(options: {
   }
 } = {}) {
   const appOptions: CreateApiAppOptions = {
-    config: testConfig(),
+    config: options.config ?? testConfig(),
     db: fakeDbResources(options.event ?? makeEvent("active"), options.publicContext),
     auth: fakeAuth(),
     permissions: options.permissions ?? fakePermissions({ event: new Set(["event.view_stats"]), platform: new Set(["platform.manage_catalog"]) }),
@@ -423,7 +472,7 @@ async function createTestApp(options: {
       events: fakeEventsService(options.event),
       accessRequests: fakeAccessRequestsService()
     },
-    logger: false
+    logger: options.logger ?? false
   }
   if (options.authenticated !== false) {
     appOptions.currentUserResolver = async () => ({ id: USER_ID, email: "user@example.com", name: "User", status: "active" })
@@ -711,7 +760,7 @@ function fakeAuth() {
   } as any
 }
 
-function testConfig(): ApiConfig {
+function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
   return {
     nodeEnv: "test",
     host: "127.0.0.1",
@@ -735,7 +784,8 @@ function testConfig(): ApiConfig {
     bootstrapPlatformOwnerEmail: "owner@example.com",
     platformSetupEnabled: true,
     platformSetupToken: "test-platform-setup-token",
-    logLevel: "silent"
+    logLevel: "silent",
+    ...overrides
   }
 }
 
@@ -743,9 +793,42 @@ async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function readFirstChunk(response: Response): Promise<string> {
+  const reader = response.body?.getReader()
+  assert.ok(reader, "Expected SSE response body")
+  const chunk = await reader.read()
+  assert.equal(chunk.done, false)
+  return new TextDecoder().decode(chunk.value)
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const startedAt = Date.now()
+  while (!predicate()) {
+    if (Date.now() - startedAt > 500) {
+      throw new Error("Timed out waiting for assertion")
+    }
+    await delay(1)
+  }
+}
+
 function assertAllowedSseCors(response: Response, origin: string): void {
   assert.match(response.headers.get("content-type") ?? "", /^text\/event-stream; charset=utf-8/)
   assert.equal(response.headers.get("access-control-allow-origin"), origin)
   assert.equal(response.headers.get("access-control-allow-credentials"), "true")
   assert.match(response.headers.get("vary") ?? "", /\bOrigin\b/)
+}
+
+function captureLogger(config: ApiConfig, lines: string[]) {
+  const loggerConfig = createLoggerConfig(config)
+  assert.notEqual(loggerConfig, false)
+  return {
+    ...(loggerConfig as Record<string, unknown>),
+    stream: {
+      write: (line: string) => lines.push(line)
+    }
+  } as never
+}
+
+function parseLogLine(line: string): Record<string, unknown> {
+  return JSON.parse(line) as Record<string, unknown>
 }

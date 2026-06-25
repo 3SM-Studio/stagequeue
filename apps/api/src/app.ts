@@ -7,7 +7,7 @@ import { registerAuth } from "./plugins/auth.ts"
 import { registerCookies } from "./plugins/cookies.ts"
 import { registerCors } from "./plugins/cors.ts"
 import { type DbResources, registerDb } from "./plugins/db.ts"
-import { type DomainEventBus, registerEventBus } from "./plugins/eventBus.ts"
+import { type DomainEventBus, registerEventBus, type RedisEventBusOptions } from "./plugins/eventBus.ts"
 import { registerPermissions } from "./plugins/permissions.ts"
 import { registerRateLimit, type RateLimitOptions } from "./plugins/rateLimit.ts"
 import { registerRequestId } from "./plugins/requestId.ts"
@@ -29,6 +29,7 @@ export type CreateApiAppOptions = {
   currentUserResolver?: CurrentUserResolver
   permissions?: PermissionService
   eventBus?: DomainEventBus
+  eventBusOptions?: RedisEventBusOptions
   rateLimit?: RateLimitOptions
   services?: Partial<ApiModuleServices>
   logger?: NonNullable<FastifyServerOptions["logger"]>
@@ -55,7 +56,7 @@ export async function createApiApp(options: CreateApiAppOptions = {}): Promise<F
   await registerDb(app, config, options.db)
   await registerPermissions(app, options.permissions)
   await registerSse(app)
-  await registerEventBus(app, config, options.eventBus)
+  await registerEventBus(app, config, options.eventBus, options.eventBusOptions)
   await registerModuleServices(app, options.services)
   await registerCors(app, config)
   await registerCookies(app)
@@ -78,13 +79,30 @@ declare module "fastify" {
   }
 }
 
-function createLoggerConfig(config: ApiConfig): NonNullable<FastifyServerOptions["logger"]> {
+export function createLoggerConfig(config: ApiConfig): NonNullable<FastifyServerOptions["logger"]> {
   if (config.logLevel === "silent" || config.nodeEnv === "test") {
     return false
   }
 
   return {
     level: config.logLevel,
-    redact: ["req.headers.authorization", "request.headers.authorization", "headers.authorization"]
+    redact: [
+      "req.headers.authorization",
+      "request.headers.authorization",
+      "headers.authorization",
+      "req.headers.cookie",
+      "request.headers.cookie",
+      "headers.cookie",
+      "req.headers.set-cookie",
+      "request.headers.set-cookie",
+      "headers.set-cookie",
+      "res.headers.set-cookie",
+      "response.headers.set-cookie",
+      "req.headers[\"set-cookie\"]",
+      "request.headers[\"set-cookie\"]",
+      "headers[\"set-cookie\"]",
+      "res.headers[\"set-cookie\"]",
+      "response.headers[\"set-cookie\"]"
+    ]
   }
 }

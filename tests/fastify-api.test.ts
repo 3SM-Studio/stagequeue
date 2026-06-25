@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
+import { EventEmitter } from "node:events"
 import test from "node:test"
-import { createApiApp } from "../apps/api/src/app.ts"
+import { createApiApp, createLoggerConfig } from "../apps/api/src/app.ts"
 import { evaluateDashboardAccess, shouldBootstrapPlatformOwner } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
@@ -57,6 +58,103 @@ test("Fastify CORS uses an allowlist and does not combine wildcard origin with c
   }
 })
 
+test("Fastify logger redacts Authorization cookie and set-cookie values", async () => {
+  const lines: string[] = []
+  const config = testConfig({
+    logLevel: "info",
+    nodeEnv: "development"
+  })
+  const loggerConfig = createLoggerConfig(config)
+  assert.notEqual(loggerConfig, false)
+  const app = await createApiApp({
+    auth: fakeAuth(),
+    config,
+    db: fakeDbResources(),
+    logger: captureLogger(config, lines)
+  })
+  const authorization = "Bearer admin-token-secret-value"
+  const cookie = "pn_participant=participant-token-secret; session=auth-session-secret"
+  const setCookie = "pn_participant=participant-token-secret; Path=/; HttpOnly"
+
+  try {
+    app.log.info(
+      {
+        headers: {
+          authorization,
+          cookie,
+          "set-cookie": setCookie
+        },
+        request: {
+          headers: {
+            authorization,
+            cookie,
+            "set-cookie": setCookie
+          }
+        },
+        response: {
+          headers: {
+            "set-cookie": setCookie
+          }
+        }
+      },
+      "redaction probe"
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+  } finally {
+    await app.close()
+  }
+
+  const logs = lines.join("")
+  assert.match(logs, /"authorization":"\[Redacted\]"/)
+  assert.match(logs, /"cookie":"\[Redacted\]"/)
+  assert.match(logs, /"set-cookie":"\[Redacted\]"/)
+  assert.equal(logs.includes(authorization), false)
+  assert.equal(logs.includes(cookie), false)
+  assert.equal(logs.includes(setCookie), false)
+  assert.equal(logs.includes("participant-token-secret"), false)
+  assert.equal(logs.includes("auth-session-secret"), false)
+})
+
+test("Fastify logs DB pool errors without DATABASE_URL and still closes pool", async () => {
+  const lines: string[] = []
+  const databaseUrl = "postgres://user:password@db.internal:5432/stagequeue"
+  const config = testConfig({
+    databaseUrl,
+    logLevel: "info",
+    nodeEnv: "development"
+  })
+  const pool = new FakeObservablePool()
+  const app = await createApiApp({
+    auth: fakeAuth(),
+    config,
+    db: {
+      db: {
+        execute: async () => []
+      } as unknown as DbResources["db"],
+      pool: pool as unknown as DbResources["pool"]
+    },
+    logger: captureLogger(config, lines)
+  })
+  const error = Object.assign(new Error(`connection lost for ${databaseUrl}`), { code: "ECONNRESET" })
+
+  try {
+    pool.emit("error", error)
+    await new Promise((resolve) => setImmediate(resolve))
+  } finally {
+    await app.close()
+  }
+
+  const log = parseLogLine(lines.find((line) => line.includes("db_pool_error")) ?? "")
+  const allLogs = lines.join("")
+  assert.equal(log.event, "db_pool_error")
+  assert.equal(log.operation, "idle_client_error")
+  assert.equal(log.errorName, "Error")
+  assert.equal(log.errorCode, "ECONNRESET")
+  assert.equal(String(log.errorMessage).includes("[redacted]"), true)
+  assert.equal(allLogs.includes(databaseUrl), false)
+  assert.equal(pool.endCalls, 1)
+})
+
 test("Fastify GET /me without a session returns authenticated false", async () => {
   const app = await createTestApp()
   try {
@@ -106,7 +204,7 @@ async function createTestApp() {
   })
 }
 
-function testConfig(): ApiConfig {
+function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
   return {
     nodeEnv: "test",
     host: "127.0.0.1",
@@ -130,7 +228,8 @@ function testConfig(): ApiConfig {
     bootstrapPlatformOwnerEmail: "owner@example.com",
     platformSetupEnabled: true,
     platformSetupToken: "test-platform-setup-token",
-    logLevel: "silent"
+    logLevel: "silent",
+    ...overrides
   }
 }
 
@@ -145,6 +244,14 @@ function fakeDbResources(): DbResources {
   }
 }
 
+class FakeObservablePool extends EventEmitter {
+  endCalls = 0
+
+  async end(): Promise<void> {
+    this.endCalls += 1
+  }
+}
+
 function fakeAuth() {
   return {
     handler: async () => new Response(null, { status: 404 }),
@@ -152,4 +259,19 @@ function fakeAuth() {
       getSession: async () => null
     }
   } as any
+}
+
+function captureLogger(config: ApiConfig, lines: string[]) {
+  const loggerConfig = createLoggerConfig(config)
+  assert.notEqual(loggerConfig, false)
+  return {
+    ...(loggerConfig as Record<string, unknown>),
+    stream: {
+      write: (line: string) => lines.push(line)
+    }
+  } as never
+}
+
+function parseLogLine(line: string): Record<string, unknown> {
+  return JSON.parse(line) as Record<string, unknown>
 }
