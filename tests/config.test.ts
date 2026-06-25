@@ -99,6 +99,12 @@ test("development config keeps local defaults", () => {
 
   assert.equal(config.nodeEnv, "development")
   assert.equal(config.databaseUrl, "postgres://poza_nuta:poza_nuta@localhost:5432/poza_nuta")
+  assert.equal(config.databasePoolMax, 10)
+  assert.equal(config.databaseIdleTimeoutMs, 30_000)
+  assert.equal(config.databaseConnectionTimeoutMs, 5_000)
+  assert.equal(config.databaseStatementTimeoutMs, 15_000)
+  assert.equal(config.databaseLockTimeoutMs, 5_000)
+  assert.equal(config.databaseApplicationName, "stagequeue-api")
   assert.equal(config.authSecret, "dev-only-poza-nuta-auth-secret-change-me")
   assert.equal(config.googleClientId, "replace_me")
 })
@@ -109,6 +115,75 @@ test("test config keeps local defaults", () => {
   assert.equal(config.nodeEnv, "test")
   assert.equal(config.publicWebUrl, "http://localhost:3000")
   assert.equal(config.dashboardWebUrl, "http://localhost:3001")
+  assert.equal(config.databasePoolMax, 10)
+  assert.equal(config.databaseApplicationName, "stagequeue-api")
+})
+
+test("config parses DB pool and timeout env values", () => {
+  const config = parseApiConfig({
+    NODE_ENV: "test",
+    DATABASE_POOL_MAX: "7",
+    DATABASE_IDLE_TIMEOUT_MS: "20000",
+    DATABASE_CONNECTION_TIMEOUT_MS: "2500",
+    DATABASE_STATEMENT_TIMEOUT_MS: "9000",
+    DATABASE_LOCK_TIMEOUT_MS: "1200",
+    DATABASE_APPLICATION_NAME: "stagequeue-api-test"
+  })
+
+  assert.equal(config.databasePoolMax, 7)
+  assert.equal(config.databaseIdleTimeoutMs, 20_000)
+  assert.equal(config.databaseConnectionTimeoutMs, 2_500)
+  assert.equal(config.databaseStatementTimeoutMs, 9_000)
+  assert.equal(config.databaseLockTimeoutMs, 1_200)
+  assert.equal(config.databaseApplicationName, "stagequeue-api-test")
+})
+
+test("config rejects invalid DB numeric env values without printing DATABASE_URL", () => {
+  const invalidValues = ["", "0", "-1", "1.5", "NaN", "abc"]
+  const numericEnvNames = [
+    "DATABASE_POOL_MAX",
+    "DATABASE_IDLE_TIMEOUT_MS",
+    "DATABASE_CONNECTION_TIMEOUT_MS",
+    "DATABASE_STATEMENT_TIMEOUT_MS",
+    "DATABASE_LOCK_TIMEOUT_MS"
+  ]
+  for (const name of numericEnvNames) {
+    for (const value of invalidValues) {
+      assert.throws(
+        () =>
+          parseApiConfig({
+            NODE_ENV: "test",
+            DATABASE_URL: "postgres://user:secret@db.internal:5432/stagequeue",
+            [name]: value
+          }),
+        (error) => {
+          assert.ok(error instanceof Error)
+          assert.match(error.message, new RegExp(`${name} must be a positive integer`))
+          assert.equal(error.message.includes("postgres://user:secret@db.internal:5432/stagequeue"), false)
+          return true
+        }
+      )
+    }
+  }
+})
+
+test("config rejects empty or sensitive database application name", () => {
+  assert.throws(
+    () =>
+      parseApiConfig({
+        NODE_ENV: "test",
+        DATABASE_APPLICATION_NAME: ""
+      }),
+    /DATABASE_APPLICATION_NAME must not be empty/
+  )
+  assert.throws(
+    () =>
+      parseApiConfig({
+        NODE_ENV: "test",
+        DATABASE_APPLICATION_NAME: "postgres://user:secret@db.internal:5432/stagequeue"
+      }),
+    /DATABASE_APPLICATION_NAME must not contain secrets/
+  )
 })
 
 test("valid production config is accepted", () => {
@@ -119,6 +194,12 @@ test("valid production config is accepted", () => {
   assert.equal(config.publicWebUrl, "https://poza-nuta.example")
   assert.equal(config.dashboardWebUrl, "https://dashboard.poza-nuta.example")
   assert.equal(config.platformSetupToken, validProductionEnv().PLATFORM_SETUP_TOKEN)
+  assert.equal(config.databasePoolMax, 12)
+  assert.equal(config.databaseIdleTimeoutMs, 25_000)
+  assert.equal(config.databaseConnectionTimeoutMs, 4_000)
+  assert.equal(config.databaseStatementTimeoutMs, 12_000)
+  assert.equal(config.databaseLockTimeoutMs, 3_000)
+  assert.equal(config.databaseApplicationName, "stagequeue-api-prod")
 })
 
 test("production config rejects bootstrap platform owner email", () => {
@@ -222,6 +303,12 @@ function validProductionEnv(): Record<string, string> {
     PUBLIC_WEB_URL: "https://poza-nuta.example",
     DASHBOARD_WEB_URL: "https://dashboard.poza-nuta.example",
     DATABASE_URL: "postgres://poza_nuta:strong-password@db.internal:5432/poza_nuta",
+    DATABASE_POOL_MAX: "12",
+    DATABASE_IDLE_TIMEOUT_MS: "25000",
+    DATABASE_CONNECTION_TIMEOUT_MS: "4000",
+    DATABASE_STATEMENT_TIMEOUT_MS: "12000",
+    DATABASE_LOCK_TIMEOUT_MS: "3000",
+    DATABASE_APPLICATION_NAME: "stagequeue-api-prod",
     REDIS_URL: "redis://redis.internal:6379",
     AUTH_SECRET: "prod_auth_secret_32_characters_min",
     PARTICIPANT_TOKEN_SECRET: "prod_participant_secret_32_chars",

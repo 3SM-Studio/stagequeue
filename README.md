@@ -255,6 +255,23 @@ Better Auth zapisuje swoje dane w tabelach `auth_users`, `auth_sessions`, `auth_
 
 W produkcji cookies Better Auth maja dzialac jako secure httpOnly session cookies. Dla subdomen ustaw `COOKIE_DOMAIN=.poza-nuta.pl`; lokalnie `COOKIE_DOMAIN=localhost` albo puste ustawienie pozwala testowac dev flow.
 
+### DB runtime pool i timeouty
+
+Fastify API uzywa `DATABASE_URL` oraz jawnych ustawien runtime dla `pg` poola. Domyslne wartosci sa konserwatywne dla dev/test i startowego deploymentu:
+
+```env
+DATABASE_POOL_MAX=10
+DATABASE_IDLE_TIMEOUT_MS=30000
+DATABASE_CONNECTION_TIMEOUT_MS=5000
+DATABASE_STATEMENT_TIMEOUT_MS=15000
+DATABASE_LOCK_TIMEOUT_MS=5000
+DATABASE_APPLICATION_NAME=stagequeue-api
+```
+
+Realne wartosci produkcyjne trzeba dobrac do hostingu, planu Postgresa, limitu polaczen DB i liczby replik API. `DATABASE_POOL_MAX` liczy sie per proces/instancje API, wiec laczny limit moze szybko urosnac przy skalowaniu horyzontalnym. `DATABASE_STATEMENT_TIMEOUT_MS` ogranicza maksymalny czas zapytania, a `DATABASE_LOCK_TIMEOUT_MS` ogranicza czekanie na lock. Puste, zerowe, ujemne i nie-numeryczne wartosci timeoutow/poola sa odrzucane przez walidacje configu.
+
+`DATABASE_APPLICATION_NAME` trafia do polaczen Postgresa i powinien byc krotka, niesekretna nazwa aplikacji. SSL policy dla Postgresa nie jest czescia C17d; trzeba ja zdecydowac osobno dla konkretnego hostingu bez provider-specific hackow.
+
 ### Redis, SSE EventBus i rate limiting
 
 Fastify API wybiera EventBus i infrastrukturalny rate limiter na podstawie konfiguracji. Bez `REDIS_URL` w development/test dzialaja adaptery in-memory, dobre tylko dla dev, testow i pojedynczej instancji procesu. Gdy `REDIS_URL` jest ustawione, API uzywa Redis Pub/Sub jako backendu EventBus oraz Redis-backed fixed-window rate limit dla abuse-prone HTTP routes. W `NODE_ENV=production` `REDIS_URL` jest wymagane przez walidacje konfiguracji, zeby multi-instance SSE fanout i rate limiting nie polegaly na pamieci jednego procesu.
