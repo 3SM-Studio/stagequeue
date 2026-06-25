@@ -255,6 +255,8 @@ Better Auth zapisuje swoje dane w tabelach `auth_users`, `auth_sessions`, `auth_
 
 W produkcji cookies Better Auth maja dzialac jako secure httpOnly session cookies. Dla subdomen ustaw `COOKIE_DOMAIN=.poza-nuta.pl`; lokalnie `COOKIE_DOMAIN=localhost` albo puste ustawienie pozwala testowac dev flow.
 
+Zamknieta beta ma osobny runbook go/no-go i evidence checklist: `docs/poza-nuta/19-beta-release-runbook.md`.
+
 ### DB runtime pool i timeouty
 
 Fastify API uzywa `DATABASE_URL` oraz jawnych ustawien runtime dla `pg` poola. Domyslne wartosci sa konserwatywne dla dev/test i startowego deploymentu:
