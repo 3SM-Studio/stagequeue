@@ -6,7 +6,7 @@ Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zast
 
 - [ ] `NODE_ENV=production`
 - [ ] `DATABASE_URL` ustawiony na produkcyjny Postgres, nie localhost.
-- [ ] `REDIS_URL` ustawiony dla Redis Pub/Sub EventBus; wymagany dla produkcji i multi-instance SSE fanout.
+- [ ] `REDIS_URL` ustawiony dla Redis Pub/Sub EventBus i Redis-backed rate limit; wymagany dla produkcji i multi-instance.
 - [ ] `AUTH_SECRET` ustawiony na losowy sekret produkcyjny, minimum 32 znaki.
 - [ ] `PARTICIPANT_TOKEN_SECRET` ustawiony na osobny losowy sekret, minimum 32 znaki.
 - [ ] `GOOGLE_CLIENT_ID` ustawiony dla produkcyjnej aplikacji OAuth.
@@ -53,8 +53,11 @@ Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zast
 - [ ] Cookie sesyjne i participant cookie działają po HTTPS.
 - [ ] `COOKIE_DOMAIN` nie wskazuje localhost w produkcji.
 - [ ] Public SSE i dashboard SSE zwracają poprawne CORS headers dla dozwolonych origins.
-- [ ] Redis-backed EventBus jest aktywny w production przez `REDIS_URL`; in-memory EventBus jest używany tylko dla dev/test/single-instance.
+- [ ] Redis-backed EventBus i Redis-backed rate limiter są aktywne w production przez `REDIS_URL`; in-memory adaptery są używane tylko dla dev/test/single-instance.
 - [ ] Zespół akceptuje, że SSE Pub/Sub jest best-effort: bez replay i gwarantowanego dostarczenia.
+- [ ] Zespół akceptuje, że Redis-backed rate limit jest fixed-window/best-effort abuse protection, bez durable counters, distributed locks ani perfect abuse protection.
+- [ ] Zespół akceptuje, że awaria Redis w production powoduje fail-closed/kontrolowany błąd dla chronionego requestu; nie ma cichego fallbacku do in-memory.
+- [ ] Domenowe limity participant (`PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT`, `PUBLIC_REQUEST_COOLDOWN_SECONDS`) są traktowane osobno od infrastrukturalnego IP/route rate limitera.
 
 ## 5. Database and Migrations
 
