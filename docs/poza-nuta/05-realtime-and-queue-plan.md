@@ -61,8 +61,12 @@ single API instance + DB-backed queue state + SSE
 Phase 2:
 
 ```txt
-Postgres LISTEN/NOTIFY or Redis pub/sub if multiple API instances need fanout
+Redis Pub/Sub EventBus for multi-instance API fanout
 ```
+
+`REDIS_URL` selects the Redis-backed EventBus. Without `REDIS_URL`, the in-memory EventBus is acceptable only for development, tests and single-instance local/runtime setups. Production and multi-instance deployments require `REDIS_URL`; otherwise API config validation fails fast.
+
+SSE fanout is best-effort Pub/Sub. There is no replay, durable delivery or event sourcing in this phase. If Redis is unavailable, live updates/SSE fanout can be delayed or missing, but queue mutations still use the normal HTTP and database path and must not change their domain semantics because realtime delivery failed.
 
 Phase 3:
 

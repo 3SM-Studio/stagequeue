@@ -233,6 +233,7 @@ GOOGLE_CLIENT_ID=replace_me
 GOOGLE_CLIENT_SECRET=replace_me
 AUTH_SECRET=replace_me_with_at_least_32_random_characters
 PARTICIPANT_TOKEN_SECRET=replace_me_with_at_least_32_random_characters
+REDIS_URL=
 PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT=3
 PUBLIC_REQUEST_COOLDOWN_SECONDS=20
 # Development/test-only fallback. Production rejects this env and uses PLATFORM_SETUP_TOKEN.
@@ -253,6 +254,12 @@ Better Auth zapisuje swoje dane w tabelach `auth_users`, `auth_sessions`, `auth_
 - user z emailem rownym `BOOTSTRAP_PLATFORM_OWNER_EMAIL` moze nadal dostac idempotentnie role `platform_owner` i status `active` w dev/legacy flow.
 
 W produkcji cookies Better Auth maja dzialac jako secure httpOnly session cookies. Dla subdomen ustaw `COOKIE_DOMAIN=.poza-nuta.pl`; lokalnie `COOKIE_DOMAIN=localhost` albo puste ustawienie pozwala testowac dev flow.
+
+### SSE EventBus i Redis
+
+Fastify API wybiera EventBus na podstawie konfiguracji. Bez `REDIS_URL` w development/test dziala adapter in-memory, dobry tylko dla dev, testow i pojedynczej instancji procesu. Gdy `REDIS_URL` jest ustawione, API uzywa Redis Pub/Sub jako backendu EventBus. W `NODE_ENV=production` `REDIS_URL` jest wymagane przez walidacje konfiguracji, zeby multi-instance SSE fanout nie polegal na pamieci jednego procesu.
+
+SSE pozostaje kanalem best-effort: Redis Pub/Sub rozsyla nowe eventy, ale nie zapewnia replay ani gwarantowanego dostarczenia po rozlaczeniu klienta. Awaria Redis oznacza problemy z live update/SSE fanout; mutacje kolejki dalej wykonuja zwykle HTTP/DB flow i nie powinny zmieniac semantyki przez sam brak realtime. UI powinno dalej traktowac SSE jako niekrytyczne i uzywac istniejacych refetch/polling fallbackow.
 
 ### Platform setup / first owner
 

@@ -5,7 +5,11 @@ import { createApiApp, type CreateApiAppOptions } from "../apps/api/src/app.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { createEventsService, type EventSummary } from "../apps/api/src/modules/events/service.ts"
 import { createQueueService, type QueueSongRequest } from "../apps/api/src/modules/queue/service.ts"
-import { createInMemoryDomainEventBus, type DomainEventPayload } from "../apps/api/src/plugins/eventBus.ts"
+import {
+  createInMemoryDomainEventBus,
+  type DomainEventBus,
+  type DomainEventPayload
+} from "../apps/api/src/plugins/eventBus.ts"
 import type { ApiModuleServices } from "../apps/api/src/plugins/modules.ts"
 import type { DbResources } from "../apps/api/src/plugins/db.ts"
 import type {
@@ -113,6 +117,52 @@ test("dashboard stream allows dashboard CORS origin", async () => {
     controller.abort()
     await app.close()
   }
+})
+
+test("public and dashboard streams use app event bus override", async () => {
+  const baseBus = createInMemoryDomainEventBus()
+  const subscribedChannels: string[] = []
+  let closeCalls = 0
+  const eventBus: DomainEventBus = {
+    ...baseBus,
+    subscribe(channel, listener) {
+      subscribedChannels.push(channel)
+      return baseBus.subscribe(channel, listener)
+    },
+    close() {
+      closeCalls += 1
+      baseBus.close?.()
+    }
+  }
+  const app = await createTestApp({ eventBus })
+  await app.listen({ host: "127.0.0.1", port: 0 })
+  const port = (app.server.address() as AddressInfo).port
+  const publicController = new AbortController()
+  const dashboardController = new AbortController()
+  try {
+    const publicResponse = await fetch(`http://127.0.0.1:${port}/public/events/${EVENT_PUBLIC_ID}/stream`, {
+      headers: {
+        Origin: "http://localhost:3000"
+      },
+      signal: publicController.signal
+    })
+    const dashboardResponse = await fetch(`http://127.0.0.1:${port}/dashboard/events/${EVENT_ID}/stream`, {
+      headers: {
+        Origin: "http://localhost:3001"
+      },
+      signal: dashboardController.signal
+    })
+
+    assert.equal(publicResponse.status, 200)
+    assert.equal(dashboardResponse.status, 200)
+    assert.equal(subscribedChannels.filter((channel) => channel === app.eventBus.eventChannel(EVENT_ID)).length, 2)
+  } finally {
+    publicController.abort()
+    dashboardController.abort()
+    await app.close()
+  }
+
+  assert.equal(closeCalls, 1)
 })
 
 test("venue-first public stream rejects venues without an active event", async () => {
@@ -354,6 +404,7 @@ test("platform catalog import stream requires platform catalog permission", asyn
 async function createTestApp(options: {
   authenticated?: boolean
   permissions?: PermissionService
+  eventBus?: DomainEventBus
   event?: EventSummary | null
   publicContext?: {
     venueStatus?: string
@@ -376,6 +427,9 @@ async function createTestApp(options: {
   }
   if (options.authenticated !== false) {
     appOptions.currentUserResolver = async () => ({ id: USER_ID, email: "user@example.com", name: "User", status: "active" })
+  }
+  if (options.eventBus !== undefined) {
+    appOptions.eventBus = options.eventBus
   }
 
   return createApiApp(appOptions)
