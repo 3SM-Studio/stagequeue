@@ -20,6 +20,7 @@
     "build:web:legacy": "vite build --config apps/web/vite.config.ts",
     "check:architecture": "node --experimental-strip-types scripts/typecheck.mjs",
     "dev": "concurrently -k -n API,PUBLIC,DASHBOARD -c blue,magenta,green \"pnpm dev:api\" \"pnpm dev:public\" \"pnpm dev:dashboard\"",
+    "ci:db-smoke": "node --experimental-strip-types scripts/ci-db-migration-smoke.ts",
     "dev:api": "pnpm --filter @poza-nuta/api dev",
     "dev:api:legacy": "node --watch --experimental-strip-types apps/api/src/server.ts",
     "dev:dashboard": "pnpm --filter @poza-nuta/dashboard-web dev",

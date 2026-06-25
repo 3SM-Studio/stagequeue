@@ -71,6 +71,7 @@ Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zast
 
 - [ ] GitHub Actions workflow `Repository CI` jest zielony.
 - [ ] Required check `Repository CI / Quality gates` jest zielony.
+- [ ] Required check `Repository CI / DB migration smoke` jest zielony; odpala migracje na świeżym ephemeral Postgres i minimalny DB smoke, żeby wykryć broken fresh-db deploy.
 - [ ] Branch protection dla `main` jest aktywne.
 - [ ] PR review jest wykonany zgodnie z Definition of Done.
 - [ ] Dependabot alerts są zamknięte albo mają opisane ryzyko i decyzję.
@@ -79,6 +80,8 @@ Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zast
 - [ ] `pnpm check:clean-package` przechodzi lokalnie albo w CI.
 - [ ] `pnpm check:web-config` został uruchomiony przed deploymentem z realnymi envami staging/production. Nie jest wymagany w domyślnym CI, bo CI nie ma produkcyjnych URL-i.
 - [ ] Release nie zawiera `.env`, dumpów DB, `node_modules`, `.next`, `dist`, `coverage` ani logów.
+
+CI DB migration smoke nie zastępuje pełnych testów integracyjnych ani testów produkcyjnej infrastruktury. To szybka bramka świeżej bazy: migracje muszą przejść na pustym Postgresie, a minimalny flow domenowy musi utworzyć event, przyjąć public request i odczytać queue.
 
 ## 7. Smoke Checks After Deployment
 
