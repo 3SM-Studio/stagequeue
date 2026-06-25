@@ -90,7 +90,17 @@ Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zast
 
 CI DB migration smoke nie zastępuje pełnych testów integracyjnych ani testów produkcyjnej infrastruktury. To szybka bramka świeżej bazy: migracje muszą przejść na pustym Postgresie, a minimalny flow domenowy musi utworzyć event, przyjąć public request i odczytać queue.
 
-## 7. Smoke Checks After Deployment
+## 7. Lightweight Observability
+
+- [ ] API structured logs maja wlaczona redakcje `Authorization`, `cookie` i `set-cookie`.
+- [ ] Zespol wie, ze C17e loguje tylko lekki core: Redis EventBus errors, Redis rate-limit errors, DB pool errors oraz SSE lifecycle.
+- [ ] Oczekiwane structured log events sa znane: `redis_event_bus_error`, `redis_rate_limit_error`, `db_pool_error`, `sse_stream_open`, `sse_stream_close`, `sse_stream_error`.
+- [ ] Logi nie zawieraja `DATABASE_URL`, `REDIS_URL`, cookies, naglowka `Authorization`, participant tokenow, pelnego invite code, raw rate-limit key ani IP z rate-limit key.
+- [ ] Logi SSE nie zawieraja payloadow streamu; lifecycle moze zawierac bezpieczny kontekst typu `scope`, `eventPublicId`, `eventId`, `requestId` i `durationMs`.
+- [ ] Zespol akceptuje, ze C17e nie dodaje Prometheus, OpenTelemetry, tracingu, alertingu, dashboardow metryk ani queue mutation timing.
+- [ ] Future work jest jawny: metrics/alerts/tracing, ewentualny shared sanitizer helper oraz queue mutation latency/timing po becie, jesli bedzie potrzebne.
+
+## 8. Smoke Checks After Deployment
 
 - [ ] API `/health` zwraca OK i `db.ok=true`.
 - [ ] Dashboard login przez Google działa.
@@ -106,7 +116,7 @@ CI DB migration smoke nie zastępuje pełnych testów integracyjnych ani testów
 - [ ] Po kontrolowanym problemie z Redis albo SSE UI nadal pozwala wykonać manual refresh/refetch, a mutacje kolejki nie zmieniają semantyki.
 - [ ] Public queue pokazuje tylko dozwolone publicznie dane i respektuje `publicQueueEnabled`.
 
-## 8. Manual QA Karaoke / Live Flow
+## 9. Manual QA Karaoke / Live Flow
 
 - [ ] Otwórz public page uczestnika w jednej przeglądarce albo sesji.
 - [ ] Otwórz dashboard operatora w drugiej przeglądarce albo sesji.
@@ -123,7 +133,7 @@ CI DB migration smoke nie zastępuje pełnych testów integracyjnych ani testów
 - [ ] Operator wykonuje close eventu.
 - [ ] Public queue/join pokazują właściwy stan po zamknięciu.
 
-## 9. Rollback Checklist
+## 10. Rollback Checklist
 
 - [ ] Określ, czy problem wymaga rollback aplikacji, roll-forward fixu, czy wyłączenia funkcji.
 - [ ] Cofnij release aplikacji do poprzedniej wersji, jeśli to najbezpieczniejsze.
@@ -133,7 +143,7 @@ CI DB migration smoke nie zastępuje pełnych testów integracyjnych ani testów
 - [ ] Ponownie uruchom smoke checks po rollbacku.
 - [ ] Udokumentuj, które dane użytkowników albo queue/events mogły zostać zmienione podczas incydentu.
 
-## 10. Release Notes
+## 11. Release Notes
 
 Release notes muszą zawierać:
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { createApiApp } from "../apps/api/src/app.ts"
+import { createApiApp, createLoggerConfig } from "../apps/api/src/app.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import {
   createRedisRateLimitResources,
@@ -124,13 +124,15 @@ test("Redis rate limit window reset starts the count again", async () => {
 })
 
 test("Redis rate limit errors fail closed with controlled production error", async () => {
+  const lines: string[] = []
   const { createRedisClient, clients } = createFakeRedisFactory({ failEval: true })
+  const config = testConfig({ nodeEnv: "production", redisUrl: REDIS_URL, logLevel: "info" })
   const app = await createApiApp({
-    config: testConfig({ nodeEnv: "production", redisUrl: REDIS_URL }),
+    config,
     db: fakeDbResources(),
     auth: fakeAuth(),
     eventBus: createInMemoryDomainEventBus(),
-    logger: false,
+    logger: captureLogger(config, lines),
     rateLimit: { createRedisClient }
   })
 
@@ -148,6 +150,16 @@ test("Redis rate limit errors fail closed with controlled production error", asy
   } finally {
     await app.close()
   }
+
+  const log = parseLogLine(lines.find((line) => line.includes("redis_rate_limit_error")) ?? "")
+  const allLogs = lines.join("")
+  assert.equal(log.event, "redis_rate_limit_error")
+  assert.equal(log.operation, "increment")
+  assert.equal(log.errorName, "Error")
+  assert.equal(String(log.errorMessage).includes("[redacted]"), true)
+  assert.equal(allLogs.includes(REDIS_URL), false)
+  assert.equal(JSON.stringify(log).includes("stagequeue:rate-limit:"), false)
+  assert.equal(JSON.stringify(log).includes("127.0.0.1"), false)
 })
 
 test("Redis rate limit cleanup closes one shared client and is idempotent", async () => {
@@ -162,6 +174,26 @@ test("Redis rate limit cleanup closes one shared client and is idempotent", asyn
   assert.equal(clients.length, 1)
   assert.equal(clients[0].quitCalls, 1)
   assert.equal(clients[0].destroyCalls, 1)
+})
+
+test("Redis rate limit cleanup logs close errors without crashing shutdown", async () => {
+  const errors: Array<{ error: unknown; operation: string }> = []
+  const { createRedisClient, clients } = createFakeRedisFactory({ failClose: true })
+  const resources = createRedisRateLimitResources(REDIS_URL, {
+    createRedisClient,
+    onError: (error, context) => errors.push({ error, operation: context.operation })
+  })
+  const store = new resources.store({ continueExceeding: false, exponentialBackoff: false })
+
+  await increment(store, "same-key", 60_000, 1)
+  await resources.close()
+  await resources.close()
+
+  assert.equal(clients.length, 1)
+  assert.equal(clients[0].quitCalls, 1)
+  assert.equal(clients[0].destroyCalls, 1)
+  assert.equal(errors.length, 1)
+  assert.equal(errors[0].operation, "close")
 })
 
 test("Fastify app close runs Redis rate limit cleanup", async () => {
@@ -229,7 +261,7 @@ function fakeAuth() {
   } as any
 }
 
-function createFakeRedisFactory(options: { failEval?: boolean } = {}) {
+function createFakeRedisFactory(options: { failEval?: boolean; failClose?: boolean } = {}) {
   const clients: FakeRedisRateLimitClient[] = []
   return {
     clients,
@@ -245,13 +277,13 @@ class FakeRedisRateLimitClient implements RedisRateLimitClient {
   readonly evalCalls: Array<{ script: string; key: string; arguments: string[] }> = []
   readonly counters = new Map<string, { current: number; expiresAt: number }>()
   readonly url: string
-  private readonly options: { failEval?: boolean }
+  private readonly options: { failEval?: boolean; failClose?: boolean }
   connectCalls = 0
   quitCalls = 0
   destroyCalls = 0
   now = 0
 
-  constructor(url: string, options: { failEval?: boolean } = {}) {
+  constructor(url: string, options: { failEval?: boolean; failClose?: boolean } = {}) {
     this.url = url
     this.options = options
   }
@@ -263,7 +295,7 @@ class FakeRedisRateLimitClient implements RedisRateLimitClient {
   async eval<T>(script: string, options: { keys: string[]; arguments: string[] }): Promise<T> {
     this.evalCalls.push({ script, key: options.keys[0], arguments: options.arguments })
     if (this.options.failEval) {
-      throw new Error("Redis unavailable")
+      throw new Error(`Redis unavailable at ${this.url} for ${options.keys[0]}`)
     }
 
     const [timeWindowValue, maxValue, continueExceedingValue, exponentialBackoffValue] = options.arguments
@@ -293,6 +325,9 @@ class FakeRedisRateLimitClient implements RedisRateLimitClient {
 
   async quit(): Promise<void> {
     this.quitCalls += 1
+    if (this.options.failClose) {
+      throw new Error(`Redis close failed at ${this.url}`)
+    }
   }
 
   destroy(): void {
@@ -329,4 +364,19 @@ function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
     logLevel: "silent",
     ...overrides
   }
+}
+
+function captureLogger(config: ApiConfig, lines: string[]) {
+  const loggerConfig = createLoggerConfig(config)
+  assert.notEqual(loggerConfig, false)
+  return {
+    ...(loggerConfig as Record<string, unknown>),
+    stream: {
+      write: (line: string) => lines.push(line)
+    }
+  } as never
+}
+
+function parseLogLine(line: string): Record<string, unknown> {
+  return JSON.parse(line) as Record<string, unknown>
 }

@@ -48,9 +48,16 @@ type RedisEventBusClient = {
   destroy?(): void
 }
 
-type RedisEventBusOptions = {
+export type RedisEventBusErrorOperation = "publish" | "subscribe" | "unsubscribe" | "parse" | "close"
+
+export type RedisEventBusErrorContext = {
+  operation: RedisEventBusErrorOperation
+  channel?: string
+}
+
+export type RedisEventBusOptions = {
   createRedisClient?: (url: string) => RedisEventBusClient
-  onError?: (error: unknown) => void
+  onError?: (error: unknown, context: RedisEventBusErrorContext) => void
 }
 
 declare module "fastify" {
@@ -59,8 +66,29 @@ declare module "fastify" {
   }
 }
 
-export async function registerEventBus(app: FastifyInstance, config: ApiConfig, override?: DomainEventBus): Promise<void> {
-  const eventBus = override ?? createDomainEventBus(config)
+export async function registerEventBus(
+  app: FastifyInstance,
+  config: ApiConfig,
+  override?: DomainEventBus,
+  options: RedisEventBusOptions = {}
+): Promise<void> {
+  const eventBus =
+    override ??
+    createDomainEventBus(config, {
+      ...options,
+      onError: (error, context) => {
+        options.onError?.(error, context)
+        app.log.error(
+          {
+            event: "redis_event_bus_error",
+            operation: context.operation,
+            ...(context.channel ? { channel: context.channel } : {}),
+            ...toSafeErrorFields(error, [config.redisUrl ?? ""])
+          },
+          "Redis EventBus error"
+        )
+      }
+    })
   app.decorate("eventBus", eventBus)
   app.addHook("onClose", async () => {
     await eventBus.close?.()
@@ -132,8 +160,8 @@ export function createRedisDomainEventBus(redisUrl: string, options: RedisEventB
   let closePromise: Promise<void> | null = null
   let closed = false
 
-  function reportError(error: unknown): void {
-    options.onError?.(error)
+  function reportError(error: unknown, context: RedisEventBusErrorContext): void {
+    options.onError?.(error, context)
   }
 
   function ensurePublisherConnected(): Promise<unknown> {
@@ -157,7 +185,7 @@ export function createRedisDomainEventBus(redisUrl: string, options: RedisEventB
     try {
       payload = JSON.parse(message) as DomainEventPayload
     } catch (error) {
-      reportError(error)
+      reportError(error, { operation: "parse", channel })
       return
     }
 
@@ -181,7 +209,7 @@ export function createRedisDomainEventBus(redisUrl: string, options: RedisEventB
         await unsubscribeRedisChannel(channel)
       }
     } catch (error) {
-      reportError(error)
+      reportError(error, { operation: "subscribe", channel })
     } finally {
       subscribingChannels.delete(channel)
     }
@@ -195,7 +223,7 @@ export function createRedisDomainEventBus(redisUrl: string, options: RedisEventB
       await subscriber.unsubscribe(channel)
       subscribedChannels.delete(channel)
     } catch (error) {
-      reportError(error)
+      reportError(error, { operation: "unsubscribe", channel })
     }
   }
 
@@ -227,7 +255,7 @@ export function createRedisDomainEventBus(redisUrl: string, options: RedisEventB
     }
     void ensurePublisherConnected()
       .then(() => publisher.publish(channel, JSON.stringify(event)))
-      .catch(reportError)
+      .catch((error) => reportError(error, { operation: "publish", channel }))
   }
 
   return {
@@ -258,7 +286,12 @@ export function createRedisDomainEventBus(redisUrl: string, options: RedisEventB
         subscribers.clear()
         subscribedChannels.clear()
         subscribingChannels.clear()
-        await Promise.allSettled([publisher.quit(), subscriber.quit()])
+        const closeResults = await Promise.allSettled([publisher.quit(), subscriber.quit()])
+        for (const result of closeResults) {
+          if (result.status === "rejected") {
+            reportError(result.reason, { operation: "close" })
+          }
+        }
         publisher.destroy?.()
         subscriber.destroy?.()
       })()
@@ -273,4 +306,34 @@ function eventChannel(eventId: string): string {
 
 function catalogImportRunChannel(importRunId: string): string {
   return `catalog-import:${importRunId}`
+}
+
+function toSafeErrorFields(error: unknown, redactedValues: string[] = []): { errorName: string; errorMessage: string; errorCode?: string } {
+  if (error instanceof Error) {
+    return {
+      errorName: error.name,
+      errorMessage: sanitizeErrorMessage(error.message, redactedValues),
+      ...readErrorCode(error)
+    }
+  }
+
+  return {
+    errorName: "Error",
+    errorMessage: sanitizeErrorMessage(String(error), redactedValues)
+  }
+}
+
+function readErrorCode(error: Error): { errorCode?: string } {
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" ? { errorCode: code } : {}
+}
+
+function sanitizeErrorMessage(message: string, redactedValues: string[]): string {
+  let sanitized = message
+  for (const value of redactedValues) {
+    if (value) {
+      sanitized = sanitized.split(value).join("[redacted]")
+    }
+  }
+  return sanitized.replace(/rediss?:\/\/\S+/gi, "[redacted]").replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, "[redacted-ip]")
 }

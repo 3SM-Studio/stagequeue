@@ -1,12 +1,15 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { createApiApp, createLoggerConfig } from "../apps/api/src/app.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
+import type { DbResources } from "../apps/api/src/plugins/db.ts"
 import {
   createDomainEventBus,
   createInMemoryDomainEventBus,
   createRedisDomainEventBus,
   type DomainEventPayload
 } from "../apps/api/src/plugins/eventBus.ts"
+import type { RedisRateLimitClient } from "../apps/api/src/plugins/rateLimit.ts"
 
 const EVENT_ID = "event-a"
 const OTHER_EVENT_ID = "event-b"
@@ -139,6 +142,53 @@ test("Redis event bus ignores invalid JSON without crashing", async () => {
   }
 })
 
+test("Redis event bus publish errors are logged without Redis URL or payload", async () => {
+  const lines: string[] = []
+  const config = testConfig({ logLevel: "info", nodeEnv: "development", redisUrl: REDIS_URL })
+  const eventBusClients: FakeRedisClient[] = []
+  const app = await createApiApp({
+    auth: fakeAuth(),
+    config,
+    db: fakeDbResources(),
+    eventBusOptions: {
+      createRedisClient: (url) => {
+        const client = new FakeRedisClient(url, { failPublish: true })
+        eventBusClients.push(client)
+        return client
+      }
+    },
+    logger: captureLogger(config, lines),
+    rateLimit: {
+      createRedisClient: (url) => new FakeRedisRateLimitClient(url)
+    }
+  })
+
+  try {
+    app.eventBus.publish({
+      type: "queue.updated",
+      eventId: EVENT_ID,
+      venueId: "payload-venue-secret",
+      requestId: "payload-request-secret"
+    })
+    await waitFor(() => lines.some((line) => line.includes("redis_event_bus_error")))
+  } finally {
+    await app.close()
+  }
+
+  const log = parseLogLine(lines.find((line) => line.includes("redis_event_bus_error")) ?? "")
+  const allLogs = lines.join("")
+  assert.equal(log.event, "redis_event_bus_error")
+  assert.equal(log.operation, "publish")
+  assert.equal(log.channel, "event:event-a")
+  assert.equal(log.errorName, "Error")
+  assert.equal(String(log.errorMessage).includes("[redacted]"), true)
+  assert.equal(eventBusClients.length, 2)
+  assert.equal(allLogs.includes(REDIS_URL), false)
+  assert.equal(allLogs.includes("payload-venue-secret"), false)
+  assert.equal(allLogs.includes("payload-request-secret"), false)
+  assert.equal(allLogs.includes("queue.updated"), false)
+})
+
 test("Redis event bus close shuts down publisher and subscriber clients", async () => {
   const { bus, publisher, subscriber } = createFakeRedisBus()
 
@@ -195,12 +245,14 @@ class FakeRedisClient {
   readonly subscribeCalls: string[] = []
   readonly unsubscribeCalls: string[] = []
   readonly listeners = new Map<string, (message: string, channel: string) => void>()
+  private readonly options: { failPublish?: boolean }
   connectCalls = 0
   quitCalls = 0
   destroyCalls = 0
 
-  constructor(url: string) {
+  constructor(url: string, options: { failPublish?: boolean } = {}) {
     this.url = url
+    this.options = options
   }
 
   async connect(): Promise<void> {
@@ -208,6 +260,9 @@ class FakeRedisClient {
   }
 
   async publish(channel: string, message: string): Promise<void> {
+    if (this.options.failPublish) {
+      throw new Error(`Redis publish failed for ${this.url}`)
+    }
     this.published.push({ channel, message })
   }
 
@@ -232,6 +287,67 @@ class FakeRedisClient {
   emit(channel: string, message: string): void {
     this.listeners.get(channel)?.(message, channel)
   }
+}
+
+class FakeRedisRateLimitClient implements RedisRateLimitClient {
+  readonly url: string
+  quitCalls = 0
+  destroyCalls = 0
+
+  constructor(url: string) {
+    this.url = url
+  }
+
+  async connect(): Promise<void> {
+    return undefined
+  }
+
+  async eval<T>(): Promise<T> {
+    return [1, 60_000] as T
+  }
+
+  async quit(): Promise<void> {
+    this.quitCalls += 1
+  }
+
+  destroy(): void {
+    this.destroyCalls += 1
+  }
+}
+
+function fakeDbResources(): DbResources {
+  return {
+    db: {
+      execute: async () => []
+    } as unknown as DbResources["db"],
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"]
+  }
+}
+
+function fakeAuth() {
+  return {
+    handler: async () => new Response(null, { status: 404 }),
+    api: {
+      getSession: async () => null
+    }
+  } as any
+}
+
+function captureLogger(config: ApiConfig, lines: string[]) {
+  const loggerConfig = createLoggerConfig(config)
+  assert.notEqual(loggerConfig, false)
+  return {
+    ...(loggerConfig as Record<string, unknown>),
+    stream: {
+      write: (line: string) => lines.push(line)
+    }
+  } as never
+}
+
+function parseLogLine(line: string): Record<string, unknown> {
+  return JSON.parse(line) as Record<string, unknown>
 }
 
 function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {

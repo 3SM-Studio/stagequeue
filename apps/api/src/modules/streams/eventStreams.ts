@@ -10,7 +10,18 @@ export function startEventStream(
     connected: Record<string, unknown>
   }
 ): FastifyReply {
+  const startedAt = Date.now()
+  const logContext = createStreamLogContext(reply, options.connected)
+
   reply.hijack()
+  app.log.debug(
+    {
+      event: "sse_stream_open",
+      operation: "open",
+      ...logContext
+    },
+    "SSE stream opened"
+  )
   app.writeSse(reply, {
     event: "connected",
     data: {
@@ -28,10 +39,74 @@ export function startEventStream(
   }, KEEPALIVE_INTERVAL_MS)
   keepalive.unref()
 
+  reply.raw.on("error", (error) => {
+    app.log.warn(
+      {
+        event: "sse_stream_error",
+        operation: "error",
+        ...logContext,
+        ...toSafeErrorFields(error)
+      },
+      "SSE stream error"
+    )
+  })
+
   reply.raw.on("close", () => {
     clearInterval(keepalive)
     unsubscribe()
+    app.log.debug(
+      {
+        event: "sse_stream_close",
+        operation: "close",
+        ...logContext,
+        durationMs: Date.now() - startedAt
+      },
+      "SSE stream closed"
+    )
   })
 
   return reply
+}
+
+function createStreamLogContext(reply: FastifyReply, connected: Record<string, unknown>): Record<string, unknown> {
+  const context: Record<string, unknown> = {
+    requestId: readReplyRequestId(reply)
+  }
+  const scope = connected.scope
+  if (typeof scope === "string") {
+    context.scope = scope
+  }
+  for (const key of ["eventId", "eventPublicId", "venueSlug", "importRunId"]) {
+    const value = connected[key]
+    if (typeof value === "string") {
+      context[key] = value
+    }
+  }
+
+  return context
+}
+
+function readReplyRequestId(reply: FastifyReply): string | undefined {
+  const requestId = (reply as unknown as { request?: { id?: unknown } }).request?.id
+  return typeof requestId === "string" ? requestId : undefined
+}
+
+function toSafeErrorFields(error: unknown): { errorName: string; errorMessage: string; errorCode?: string } {
+  if (error instanceof Error) {
+    return {
+      errorName: error.name,
+      errorMessage: error.message,
+      ...readErrorCode(error)
+    }
+  }
+
+  return {
+    errorName: "Error",
+    errorMessage: String(error)
+  }
+}
+
+function readErrorCode(error: Error): { errorCode?: string } {
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" ? { errorCode: code } : {}
 }

@@ -280,6 +280,21 @@ SSE pozostaje kanalem best-effort: Redis Pub/Sub rozsyla nowe eventy, ale nie za
 
 Redis-backed rate limiting jest best-effort abuse protection, nie perfekcyjnym systemem quota ani durable counter store. Awaria Redis w production powoduje fail-closed dla chronionego requestu przez kontrolowany blad API; nie ma cichego fallbacku do in-memory w production. Domenowe limity uczestnika, takie jak `PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT` i `PUBLIC_REQUEST_COOLDOWN_SECONDS`, pozostaja osobnymi regulami queue service i nie sa tym samym co infrastrukturalny IP/route rate limiter.
 
+### Lightweight observability
+
+Fastify API uzywa structured logs z istniejacego loggera. C17e dodaje lekka obserwowalnosc runtime bez Prometheusa, OpenTelemetry, tracingu, alertingu, dashboardow metryk ani queue mutation timing.
+
+Logger redaction obejmuje `Authorization`, `cookie` i `set-cookie`. Logi produkcyjne nie powinny zawierac `DATABASE_URL`, `REDIS_URL`, cookies, naglowka `Authorization`, participant tokenow, pelnego invite code, raw rate-limit key, IP z rate-limit key ani payloadow SSE.
+
+Dodane structured log events:
+
+- `redis_event_bus_error` dla bledow Redis EventBus publish/subscribe/unsubscribe/parse/close,
+- `redis_rate_limit_error` dla bledow Redis-backed rate limit increment/close,
+- `db_pool_error` dla bledow idle client/poola Postgresa,
+- `sse_stream_open`, `sse_stream_close`, `sse_stream_error` dla lekkiego lifecycle SSE.
+
+Future work po becie: metrics/alerts/tracing, ewentualny shared sanitizer helper oraz queue mutation latency/timing, jesli realne incidenty albo beta feedback pokaza taka potrzebe.
+
 ### Platform setup / first owner
 
 Docelowy mechanizm pierwszego ownera platformy to jednorazowy setup:
