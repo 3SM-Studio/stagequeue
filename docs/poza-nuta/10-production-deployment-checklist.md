@@ -2,6 +2,8 @@
 
 Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zastępuje CI ani testów, tylko porządkuje ręczne bramki przed i po release.
 
+Przed zamknieta beta uzyj tez `docs/poza-nuta/19-beta-release-runbook.md` jako spietego go/no-go runbooka i evidence checklist.
+
 ## 1. Required Production Environment Variables
 
 - [ ] `NODE_ENV=production`
