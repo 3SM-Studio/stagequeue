@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
 import { sql, eq } from "drizzle-orm"
-import { createDbClient } from "../packages/db/src/client.ts"
 import {
+  createDbClient,
   events,
   organizations,
   organizationMemberships,
@@ -12,9 +12,9 @@ import {
   users,
   venueOrganizationAccess,
   venues
-} from "../packages/db/src/schema.ts"
-import { createEventsService } from "../apps/api/src/modules/events/service.ts"
-import { createQueueService } from "../apps/api/src/modules/queue/service.ts"
+} from "@poza-nuta/db"
+import { createEventsService } from "../src/modules/events/service.ts"
+import { createQueueService } from "../src/modules/queue/service.ts"
 
 const databaseUrl = process.env.DATABASE_URL?.trim()
 

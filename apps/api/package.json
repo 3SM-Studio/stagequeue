@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch --experimental-strip-types src/index.ts",
+    "ci:db-smoke": "node --experimental-strip-types scripts/ci-db-migration-smoke.ts",
     "smoke": "node --experimental-strip-types scripts/smoke.mjs",
     "start": "node --experimental-strip-types src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
