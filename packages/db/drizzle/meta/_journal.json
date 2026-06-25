@@ -71,6 +71,13 @@
       "when": 1781621386480,
       "tag": "0009_optimal_james_howlett",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782394620751,
+      "tag": "0010_even_prodigy",
+      "breakpoints": true
     }
   ]
 }
