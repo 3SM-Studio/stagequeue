@@ -69,6 +69,10 @@ Ta checklista dotyczy produkcyjnego deploymentu Stagequeue / Poza Nuta. Nie zast
 - [ ] W razie problemu preferujemy rollback aplikacji albo roll-forward migracji.
 - [ ] `/health` po migracji zwraca poprawny status API i DB.
 - [ ] Weryfikujemy, że produkcyjne `DATABASE_URL` nie wskazuje lokalnej albo testowej bazy.
+- [ ] DB runtime config jest ustawiony albo świadomie zostaje przy defaultach: `DATABASE_POOL_MAX=10`, `DATABASE_IDLE_TIMEOUT_MS=30000`, `DATABASE_CONNECTION_TIMEOUT_MS=5000`, `DATABASE_STATEMENT_TIMEOUT_MS=15000`, `DATABASE_LOCK_TIMEOUT_MS=5000`, `DATABASE_APPLICATION_NAME=stagequeue-api`.
+- [ ] `DATABASE_POOL_MAX` jest dobrany do liczby instancji API i limitu połączeń Postgresa w hostingu/planie bazy.
+- [ ] `DATABASE_STATEMENT_TIMEOUT_MS` ogranicza maksymalny czas pojedynczego zapytania, a `DATABASE_LOCK_TIMEOUT_MS` ogranicza czekanie na lock; wartości są dobrane do realnego runtime i nie ukrywają problemów z query/lockami.
+- [ ] SSL policy dla Postgresa nie jest częścią C17d; trzeba ją zdecydować osobno dla wybranego hostingu bez provider-specific hacków.
 
 ## 6. CI and Security Gates Before Release
 

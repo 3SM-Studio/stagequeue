@@ -11,6 +11,12 @@ export type ApiConfig = {
   dashboardWebUrl: string
   cookieDomain?: string
   databaseUrl: string
+  databasePoolMax: number
+  databaseIdleTimeoutMs: number
+  databaseConnectionTimeoutMs: number
+  databaseStatementTimeoutMs: number
+  databaseLockTimeoutMs: number
+  databaseApplicationName: string
   redisUrl?: string
   authSecret: string
   googleClientId: string
@@ -26,6 +32,12 @@ export type ApiConfig = {
 
 const LOCAL_DATABASE_URL = "postgres://poza_nuta:poza_nuta@localhost:5432/poza_nuta"
 const LOCAL_AUTH_SECRET = "dev-only-poza-nuta-auth-secret-change-me"
+const DEFAULT_DATABASE_POOL_MAX = 10
+const DEFAULT_DATABASE_IDLE_TIMEOUT_MS = 30_000
+const DEFAULT_DATABASE_CONNECTION_TIMEOUT_MS = 5_000
+const DEFAULT_DATABASE_STATEMENT_TIMEOUT_MS = 15_000
+const DEFAULT_DATABASE_LOCK_TIMEOUT_MS = 5_000
+const DEFAULT_DATABASE_APPLICATION_NAME = "stagequeue-api"
 
 export async function loadApiConfig(envPath = ".env", envOverrides: NodeJS.ProcessEnv = process.env): Promise<ApiConfig> {
   const fileEnv = await readEnvFile(envPath)
@@ -40,6 +52,32 @@ export function parseApiConfig(env: Record<string, string | undefined>): ApiConf
   const publicWebUrl = readText(env.PUBLIC_WEB_URL) ?? "http://localhost:3000"
   const dashboardWebUrl = readText(env.DASHBOARD_WEB_URL) ?? "http://localhost:3001"
   const databaseUrl = readText(env.DATABASE_URL) ?? (nodeEnv === "production" ? undefined : LOCAL_DATABASE_URL)
+  const databasePoolMax = parseRequiredPositiveInteger(
+    "DATABASE_POOL_MAX",
+    env.DATABASE_POOL_MAX,
+    DEFAULT_DATABASE_POOL_MAX
+  )
+  const databaseIdleTimeoutMs = parseRequiredPositiveInteger(
+    "DATABASE_IDLE_TIMEOUT_MS",
+    env.DATABASE_IDLE_TIMEOUT_MS,
+    DEFAULT_DATABASE_IDLE_TIMEOUT_MS
+  )
+  const databaseConnectionTimeoutMs = parseRequiredPositiveInteger(
+    "DATABASE_CONNECTION_TIMEOUT_MS",
+    env.DATABASE_CONNECTION_TIMEOUT_MS,
+    DEFAULT_DATABASE_CONNECTION_TIMEOUT_MS
+  )
+  const databaseStatementTimeoutMs = parseRequiredPositiveInteger(
+    "DATABASE_STATEMENT_TIMEOUT_MS",
+    env.DATABASE_STATEMENT_TIMEOUT_MS,
+    DEFAULT_DATABASE_STATEMENT_TIMEOUT_MS
+  )
+  const databaseLockTimeoutMs = parseRequiredPositiveInteger(
+    "DATABASE_LOCK_TIMEOUT_MS",
+    env.DATABASE_LOCK_TIMEOUT_MS,
+    DEFAULT_DATABASE_LOCK_TIMEOUT_MS
+  )
+  const databaseApplicationName = parseDatabaseApplicationName(env.DATABASE_APPLICATION_NAME, DEFAULT_DATABASE_APPLICATION_NAME)
   const redisUrl = readText(env.REDIS_URL)
   const authSecret = readText(env.AUTH_SECRET) ?? (nodeEnv === "production" ? undefined : LOCAL_AUTH_SECRET)
   const googleClientId = readText(env.GOOGLE_CLIENT_ID) ?? (nodeEnv === "production" ? undefined : "replace_me")
@@ -67,6 +105,12 @@ export function parseApiConfig(env: Record<string, string | undefined>): ApiConf
     publicWebUrl,
     dashboardWebUrl,
     databaseUrl: databaseUrl ?? "",
+    databasePoolMax,
+    databaseIdleTimeoutMs,
+    databaseConnectionTimeoutMs,
+    databaseStatementTimeoutMs,
+    databaseLockTimeoutMs,
+    databaseApplicationName,
     authSecret: authSecret ?? "",
     googleClientId: googleClientId ?? "",
     googleClientSecret: googleClientSecret ?? "",
@@ -321,6 +365,39 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
   return parsed
 }
 
+function parseRequiredPositiveInteger(name: string, value: string | undefined, fallback: number): number {
+  if (value === undefined) {
+    return fallback
+  }
+
+  const trimmed = value.trim()
+  const parsed = Number(trimmed)
+  if (!trimmed || !Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`Invalid configuration: ${name} must be a positive integer`)
+  }
+
+  return parsed
+}
+
+function parseDatabaseApplicationName(value: string | undefined, fallback: string): string {
+  if (value === undefined) {
+    return fallback
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    throw new Error("Invalid configuration: DATABASE_APPLICATION_NAME must not be empty")
+  }
+  if (trimmed.length > 64) {
+    throw new Error("Invalid configuration: DATABASE_APPLICATION_NAME must be 64 characters or fewer")
+  }
+  if (isSensitiveApplicationName(trimmed)) {
+    throw new Error("Invalid configuration: DATABASE_APPLICATION_NAME must not contain secrets")
+  }
+
+  return trimmed
+}
+
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === "true") {
     return true
@@ -335,4 +412,16 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 function readText(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed ? trimmed : undefined
+}
+
+function isSensitiveApplicationName(value: string): boolean {
+  const normalized = value.toLowerCase()
+  return (
+    normalized.includes("://") ||
+    normalized.includes("@") ||
+    normalized.includes("password") ||
+    normalized.includes("secret") ||
+    normalized.includes("token") ||
+    normalized.includes("key=")
+  )
 }
