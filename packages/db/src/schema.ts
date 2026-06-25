@@ -131,17 +131,21 @@ export const authVerifications = pgTable("auth_verifications", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 })
 
-export const users = pgTable("users", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  authUserId: text("auth_user_id")
-    .unique()
-    .references(() => authUsers.id, { onDelete: "set null" }),
-  email: text("email").notNull().unique(),
-  name: text("name"),
-  avatarUrl: text("avatar_url"),
-  status: text("status").notNull().default("pending"),
-  ...timestamps
-})
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    authUserId: text("auth_user_id")
+      .unique()
+      .references(() => authUsers.id, { onDelete: "set null" }),
+    email: text("email").notNull().unique(),
+    name: text("name"),
+    avatarUrl: text("avatar_url"),
+    status: text("status").notNull().default("pending"),
+    ...timestamps
+  },
+  (table) => [check("users_status_check", sql`${table.status} in ('pending', 'active', 'disabled')`)]
+)
 
 export const platformMemberships = pgTable(
   "platform_memberships",
@@ -157,7 +161,9 @@ export const platformMemberships = pgTable(
   },
   (table) => [
     unique("platform_memberships_user_role_unique").on(table.userId, table.role),
-    index("platform_memberships_user_id_idx").on(table.userId)
+    index("platform_memberships_user_id_idx").on(table.userId),
+    check("platform_memberships_role_check", sql`${table.role} in ('platform_owner', 'platform_admin')`),
+    check("platform_memberships_status_check", sql`${table.status} in ('active', 'disabled')`)
   ]
 )
 
@@ -187,26 +193,44 @@ export const organizationMemberships = pgTable(
   },
   (table) => [
     unique("organization_memberships_organization_user_unique").on(table.organizationId, table.userId),
-    index("organization_memberships_user_id_idx").on(table.userId)
+    index("organization_memberships_user_id_idx").on(table.userId),
+    check(
+      "organization_memberships_role_check",
+      sql`${table.role} in ('owner', 'admin', 'booking_manager', 'host', 'operator', 'viewer')`
+    ),
+    check(
+      "organization_memberships_status_check",
+      sql`${table.status} in ('invited', 'active', 'suspended', 'removed', 'disabled')`
+    )
   ]
 )
 
-export const venues = pgTable("venues", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  slug: text("slug").notNull().unique(),
-  name: text("name").notNull(),
-  address: text("address"),
-  city: text("city"),
-  country: text("country").notNull().default("PL"),
-  timezone: text("timezone").notNull().default("Europe/Warsaw"),
-  status: text("status").notNull().default("draft"),
-  verificationStatus: text("verification_status").notNull().default("unclaimed"),
-  claimedByOrganizationId: uuid("claimed_by_organization_id").references(() => organizations.id, {
-    onDelete: "set null"
-  }),
-  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
-  ...timestamps
-})
+export const venues = pgTable(
+  "venues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    address: text("address"),
+    city: text("city"),
+    country: text("country").notNull().default("PL"),
+    timezone: text("timezone").notNull().default("Europe/Warsaw"),
+    status: text("status").notNull().default("draft"),
+    verificationStatus: text("verification_status").notNull().default("unclaimed"),
+    claimedByOrganizationId: uuid("claimed_by_organization_id").references(() => organizations.id, {
+      onDelete: "set null"
+    }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps
+  },
+  (table) => [
+    check("venues_status_check", sql`${table.status} in ('draft', 'active', 'archived')`),
+    check(
+      "venues_verification_status_check",
+      sql`${table.verificationStatus} in ('unclaimed', 'pending', 'verified', 'rejected')`
+    )
+  ]
+)
 
 export const venueOrganizationAccess = pgTable(
   "venue_organization_access",
@@ -232,7 +256,15 @@ export const venueOrganizationAccess = pgTable(
       table.organizationId,
       table.role
     ),
-    index("venue_organization_access_organization_id_idx").on(table.organizationId)
+    index("venue_organization_access_organization_id_idx").on(table.organizationId),
+    check(
+      "venue_organization_access_role_check",
+      sql`${table.role} in ('owner', 'manager', 'event_creator', 'karaoke_operator', 'viewer')`
+    ),
+    check(
+      "venue_organization_access_status_check",
+      sql`${table.status} in ('pending', 'active', 'revoked', 'expired', 'rejected')`
+    )
   ]
 )
 
@@ -265,6 +297,10 @@ export const events = pgTable(
       .on(table.venueId)
       .where(sql`${table.status} in ('active', 'paused')`),
     index("events_operated_by_organization_id_idx").on(table.operatedByOrganizationId),
+    check(
+      "events_status_check",
+      sql`${table.status} in ('draft', 'scheduled', 'active', 'paused', 'closed', 'archived', 'cancelled')`
+    ),
     check("events_join_access_mode_check", sql`${table.joinAccessMode} in ('open', 'invite_required')`)
   ]
 )
@@ -283,7 +319,8 @@ export const eventInvites = pgTable(
   },
   (table) => [
     unique("event_invites_code_unique").on(table.code),
-    index("event_invites_event_id_idx").on(table.eventId)
+    index("event_invites_event_id_idx").on(table.eventId),
+    check("event_invites_status_check", sql`${table.status} in ('active', 'revoked')`)
   ]
 )
 
@@ -349,7 +386,12 @@ export const eventStaffAssignments = pgTable(
   },
   (table) => [
     unique("event_staff_assignments_event_user_role_unique").on(table.eventId, table.userId, table.role),
-    index("event_staff_assignments_user_id_idx").on(table.userId)
+    index("event_staff_assignments_user_id_idx").on(table.userId),
+    check(
+      "event_staff_assignments_role_check",
+      sql`${table.role} in ('lead_host', 'host', 'queue_operator', 'viewer')`
+    ),
+    check("event_staff_assignments_status_check", sql`${table.status} in ('active', 'removed')`)
   ]
 )
 
@@ -435,7 +477,11 @@ export const songRequests = pgTable(
       .on(table.eventId, table.position)
       .where(sql`${table.status} = 'approved' and ${table.position} is not null`),
     index("song_requests_event_status_position_idx").on(table.eventId, table.status, table.position),
-    index("song_requests_source_track_idx").on(table.sourceId, table.sourceTrackId)
+    index("song_requests_source_track_idx").on(table.sourceId, table.sourceTrackId),
+    check(
+      "song_requests_status_check",
+      sql`${table.status} in ('pending', 'approved', 'now', 'done', 'skipped', 'rejected')`
+    )
   ]
 )
 
@@ -524,7 +570,12 @@ export const accessRequests = pgTable(
   },
   (table) => [
     index("access_requests_status_created_at_idx").on(table.status, table.createdAt),
-    index("access_requests_email_idx").on(table.email)
+    index("access_requests_email_idx").on(table.email),
+    check("access_requests_status_check", sql`${table.status} in ('pending', 'approved', 'rejected')`),
+    check(
+      "access_requests_venue_access_role_check",
+      sql`${table.venueAccessRole} in ('owner', 'manager', 'event_creator', 'karaoke_operator', 'viewer')`
+    )
   ]
 )
 

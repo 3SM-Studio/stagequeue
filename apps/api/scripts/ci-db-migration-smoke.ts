@@ -25,6 +25,24 @@ if (!databaseUrl) {
 
 const { db, pool } = createDbClient(databaseUrl)
 const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`
+const c18bCheckConstraintNames = [
+  "users_status_check",
+  "platform_memberships_role_check",
+  "platform_memberships_status_check",
+  "organization_memberships_role_check",
+  "organization_memberships_status_check",
+  "venues_status_check",
+  "venues_verification_status_check",
+  "venue_organization_access_role_check",
+  "venue_organization_access_status_check",
+  "events_status_check",
+  "event_invites_status_check",
+  "event_staff_assignments_role_check",
+  "event_staff_assignments_status_check",
+  "song_requests_status_check",
+  "access_requests_status_check",
+  "access_requests_venue_access_role_check"
+] as const
 const createdIds: {
   userId?: string
   organizationId?: string
@@ -38,6 +56,9 @@ try {
   const selectResult = await db.execute(sql`select 1 as ok`)
   assert.ok(selectResult, "SELECT 1 should return a result")
   console.log("CI DB smoke: connected")
+
+  await assertC18bCheckConstraintsExist()
+  console.log("CI DB smoke: constraints verified")
 
   const seeded = await seedMinimalDomain(suffix)
   Object.assign(createdIds, seeded)
@@ -177,6 +198,26 @@ async function seedMinimalDomain(uniqueSuffix: string): Promise<{
     venueId: venue.id,
     sourceId
   }
+}
+
+async function assertC18bCheckConstraintsExist(): Promise<void> {
+  const result = await pool.query<{ constraint_name: string }>(
+    `
+      select c.conname as constraint_name
+      from pg_constraint c
+      join pg_class t on t.oid = c.conrelid
+      join pg_namespace n on n.oid = t.relnamespace
+      where n.nspname = 'public'
+        and c.contype = 'c'
+        and c.convalidated = true
+        and c.conname = any($1::text[])
+    `,
+    [[...c18bCheckConstraintNames]]
+  )
+  const found = new Set(result.rows.map((row) => row.constraint_name))
+  const missing = c18bCheckConstraintNames.filter((constraintName) => !found.has(constraintName))
+
+  assert.deepEqual(missing, [], "C18b CHECK constraints should exist and be validated")
 }
 
 async function cleanupCreatedRows(): Promise<void> {

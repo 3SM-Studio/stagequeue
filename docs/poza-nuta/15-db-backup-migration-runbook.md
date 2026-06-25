@@ -35,6 +35,78 @@ Przed migracja:
 
 Nie uruchamiaj migracji podczas live karaoke eventu bez jawnej decyzji SEV i planu manualnej kolejki.
 
+### C18b CHECK constraints pre-check
+
+Przed migracja `0010_even_prodigy.sql` uruchom ponizszy pre-check na docelowej bazie staging albo production. Wynik powinien miec `invalid_count = 0` dla kazdego wiersza. Zapytanie nie wypisuje danych uczestnikow ani sekretow.
+
+```sql
+select 'users.status' as column_name, count(*) as invalid_count
+from users
+where status not in ('pending', 'active', 'disabled')
+union all
+select 'platform_memberships.role', count(*)
+from platform_memberships
+where role not in ('platform_owner', 'platform_admin')
+union all
+select 'platform_memberships.status', count(*)
+from platform_memberships
+where status not in ('active', 'disabled')
+union all
+select 'organization_memberships.role', count(*)
+from organization_memberships
+where role not in ('owner', 'admin', 'booking_manager', 'host', 'operator', 'viewer')
+union all
+select 'organization_memberships.status', count(*)
+from organization_memberships
+where status not in ('invited', 'active', 'suspended', 'removed', 'disabled')
+union all
+select 'venues.status', count(*)
+from venues
+where status not in ('draft', 'active', 'archived')
+union all
+select 'venues.verification_status', count(*)
+from venues
+where verification_status not in ('unclaimed', 'pending', 'verified', 'rejected')
+union all
+select 'venue_organization_access.role', count(*)
+from venue_organization_access
+where role not in ('owner', 'manager', 'event_creator', 'karaoke_operator', 'viewer')
+union all
+select 'venue_organization_access.status', count(*)
+from venue_organization_access
+where status not in ('pending', 'active', 'revoked', 'expired', 'rejected')
+union all
+select 'events.status', count(*)
+from events
+where status not in ('draft', 'scheduled', 'active', 'paused', 'closed', 'archived', 'cancelled')
+union all
+select 'event_invites.status', count(*)
+from event_invites
+where status not in ('active', 'revoked')
+union all
+select 'event_staff_assignments.role', count(*)
+from event_staff_assignments
+where role not in ('lead_host', 'host', 'queue_operator', 'viewer')
+union all
+select 'event_staff_assignments.status', count(*)
+from event_staff_assignments
+where status not in ('active', 'removed')
+union all
+select 'song_requests.status', count(*)
+from song_requests
+where status not in ('pending', 'approved', 'now', 'done', 'skipped', 'rejected')
+union all
+select 'access_requests.status', count(*)
+from access_requests
+where status not in ('pending', 'approved', 'rejected')
+union all
+select 'access_requests.venue_access_role', count(*)
+from access_requests
+where venue_access_role not in ('owner', 'manager', 'event_creator', 'karaoke_operator', 'viewer');
+```
+
+Jesli dowolny licznik jest wiekszy niz `0`, zatrzymaj migracje i przygotuj jawny data cleanup/backfill. Kazda obca wartosc zablokuje `VALIDATE CONSTRAINT`; nie omijaj constraintow przez reczna edycje migracji ani nie naprawiaj danych bez aktualnego backupu.
+
 ## 3. Backup checklist
 
 Przed migracja wykonaj minimum jeden backup produkcyjnej bazy:
