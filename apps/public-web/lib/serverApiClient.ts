@@ -4,6 +4,7 @@ import {
   PublicApiError,
   type ActiveEventLookup,
   type ApiErrorBody,
+  type PublicDiscoveryResponse,
   type PublicEventDetail,
   type PublicInviteClaimResponse,
   type PublicQueue,
@@ -11,6 +12,7 @@ import {
 } from "./apiClient.ts"
 import {
   assertActiveEventResponse,
+  assertPublicDiscoveryResponse,
   assertPublicInviteClaimResponse,
   assertPublicEventDetailResponse,
   assertPublicQueueResponse,
@@ -52,6 +54,10 @@ export async function getServerPublicEventDetail(eventPublicId: string, cookieHe
   return assertPublicEventDetailResponse(
     await fetchServerJson(`/public/events/${encodeURIComponent(eventPublicId)}`, requestInitWithCookie(cookieHeader))
   )
+}
+
+export async function fetchPublicDiscovery(): Promise<PublicDiscoveryResponse> {
+  return assertPublicDiscoveryResponse(await fetchServerJson("/public/discovery"))
 }
 
 export type ServerInviteClaimResult = {

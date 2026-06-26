@@ -16,18 +16,20 @@ import {
   type EventVisibility
 } from "@poza-nuta/db"
 import { randomBytes } from "node:crypto"
-import { and, eq, inArray, ne, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm"
 import { ApiHttpError } from "../../errors.ts"
 import type { DomainEventBus, DomainEventType } from "../../plugins/eventBus.ts"
 import {
   assertPublicEventContainerVisible,
   assertPublicEventDirectlyVisible,
   assertPublicEventDetailVisible,
+  computePublicJoinState,
   getPublicQueueState,
   getPublicSubmissionsState,
   isPublicEventDiscoverable,
   isPublicOrganizationVisible,
-  isPublicVenueVisible
+  isPublicVenueVisible,
+  type PublicJoinState
 } from "../publicVisibility.ts"
 
 export type EventSummary = {
@@ -128,6 +130,38 @@ export type PublicEventResolution = {
   joinAccessMode: EventJoinAccessMode
 }
 
+export type PublicDiscoveryEvent = {
+  eventPublicId: string
+  name: string
+  status: "active" | "scheduled"
+  startsAt: Date | null
+  venue: {
+    slug: string
+    name: string
+    city: string | null
+    timezone: string
+  }
+  joinState: PublicJoinState
+}
+
+export type PublicDiscoveryVenue = {
+  slug: string
+  name: string
+  city: string | null
+  timezone: string
+  activeEvent: {
+    eventPublicId: string
+    name: string
+    joinState: PublicJoinState
+  } | null
+}
+
+export type PublicDiscovery = {
+  now: PublicDiscoveryEvent[]
+  upcoming: PublicDiscoveryEvent[]
+  venues: PublicDiscoveryVenue[]
+}
+
 export type PublicInviteClaim = {
   eventPublicId: string
   redirectTo: string
@@ -199,6 +233,7 @@ export type EventsService = {
   removeStaffAssignment(eventId: string, assignmentId: string): Promise<EventStaffAssignmentSummary>
   organizationHasActiveVenueAccess(organizationId: string, venueId: string): Promise<boolean>
   userIsActiveOrganizationMember(userId: string, organizationId: string): Promise<boolean>
+  getPublicDiscovery(): Promise<PublicDiscovery>
   getPublicActiveEventByVenueSlug(venueSlug: string): Promise<PublicActiveEventLookup | null>
   resolvePublicEventByPublicId(eventPublicId: string): Promise<PublicEventResolution | null>
   getPublicEventById(eventPublicId: string, participantTokenHash?: string): Promise<PublicEventDetail | null>
@@ -529,6 +564,20 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         .limit(1)
 
       return rows.length > 0
+    },
+
+    async getPublicDiscovery() {
+      const [now, upcoming, discoveryVenues] = await Promise.all([
+        listPublicDiscoveryEvents(db, "active"),
+        listPublicDiscoveryEvents(db, "scheduled"),
+        listPublicDiscoveryVenues(db)
+      ])
+
+      return {
+        now,
+        upcoming,
+        venues: discoveryVenues
+      }
     },
 
     async getPublicActiveEventByVenueSlug(venueSlug) {
@@ -996,6 +1045,164 @@ const publicInviteClaimSelection = {
   organization: {
     status: organizations.status
   }
+}
+
+const publicDiscoveryEventSelection = {
+  event: {
+    publicId: events.publicId,
+    name: events.name,
+    status: events.status,
+    visibility: events.visibility,
+    startsAt: events.startsAt,
+    publicJoinEnabled: events.publicJoinEnabled,
+    joinAccessMode: events.joinAccessMode
+  },
+  venue: {
+    slug: venues.slug,
+    name: venues.name,
+    city: venues.city,
+    timezone: venues.timezone,
+    status: venues.status,
+    verificationStatus: venues.verificationStatus
+  },
+  organization: {
+    status: organizations.status
+  }
+}
+
+const publicDiscoveryVenueSelection = {
+  id: venues.id,
+  slug: venues.slug,
+  name: venues.name,
+  city: venues.city,
+  timezone: venues.timezone,
+  status: venues.status,
+  verificationStatus: venues.verificationStatus,
+  organization: {
+    status: organizations.status
+  }
+}
+
+const publicDiscoveryVenueEventSelection = {
+  venueId: events.venueId,
+  event: {
+    publicId: events.publicId,
+    name: events.name,
+    status: events.status,
+    visibility: events.visibility,
+    publicJoinEnabled: events.publicJoinEnabled,
+    joinAccessMode: events.joinAccessMode
+  },
+  organization: {
+    status: organizations.status
+  }
+}
+
+async function listPublicDiscoveryEvents(
+  db: DbClient,
+  status: PublicDiscoveryEvent["status"]
+): Promise<PublicDiscoveryEvent[]> {
+  const startsAtOrder =
+    status === "active" ? sql`${events.startsAt} desc nulls last` : sql`${events.startsAt} asc nulls last`
+  const rows = await db
+    .select(publicDiscoveryEventSelection)
+    .from(events)
+    .innerJoin(venues, eq(events.venueId, venues.id))
+    .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+    .where(
+      and(
+        eq(events.status, status),
+        eq(events.visibility, "public"),
+        eq(venues.status, "active"),
+        eq(venues.verificationStatus, "verified"),
+        eq(organizations.status, "active")
+      )
+    )
+    .orderBy(startsAtOrder, asc(events.name), asc(events.publicId))
+    .limit(12)
+
+  return rows
+    .filter(
+      (row) =>
+        row.event.status === status &&
+        isPublicEventDiscoverable(row.event) &&
+        isPublicVenueVisible(row.venue) &&
+        isPublicOrganizationVisible(row.organization)
+    )
+    .map((row) => ({
+      eventPublicId: row.event.publicId,
+      name: row.event.name,
+      status,
+      startsAt: row.event.startsAt,
+      venue: {
+        slug: row.venue.slug,
+        name: row.venue.name,
+        city: row.venue.city,
+        timezone: row.venue.timezone
+      },
+      joinState: computePublicJoinState(row.event)
+    }))
+}
+
+async function listPublicDiscoveryVenues(db: DbClient): Promise<PublicDiscoveryVenue[]> {
+  const rows = await db
+    .select(publicDiscoveryVenueSelection)
+    .from(venues)
+    .innerJoin(organizations, eq(venues.claimedByOrganizationId, organizations.id))
+    .where(
+      and(
+        eq(venues.status, "active"),
+        eq(venues.verificationStatus, "verified"),
+        eq(organizations.status, "active")
+      )
+    )
+    .orderBy(asc(venues.name), asc(venues.slug))
+    .limit(24)
+  const publicVenues = rows.filter(
+    (row) => isPublicVenueVisible(row) && isPublicOrganizationVisible(row.organization)
+  )
+  const venueIds = publicVenues.map((venue) => venue.id)
+  const activeEventRows =
+    venueIds.length === 0
+      ? []
+      : await db
+          .select(publicDiscoveryVenueEventSelection)
+          .from(events)
+          .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
+          .where(
+            and(
+              inArray(events.venueId, venueIds),
+              eq(events.status, "active"),
+              eq(events.visibility, "public"),
+              eq(organizations.status, "active")
+            )
+          )
+          .orderBy(asc(events.venueId), asc(events.publicId))
+  const activeEventByVenueId = new Map(
+    activeEventRows
+      .filter(
+        (row) =>
+          row.event.status === "active" &&
+          isPublicEventDiscoverable(row.event) &&
+          isPublicOrganizationVisible(row.organization)
+      )
+      .map((row) => [
+        row.venueId,
+        {
+          eventPublicId: row.event.publicId,
+          name: row.event.name,
+          joinState: computePublicJoinState(row.event)
+        }
+      ])
+  )
+
+  return publicVenues.map((venue) => ({
+    slug: venue.slug,
+    name: venue.name,
+    city: venue.city,
+    timezone: venue.timezone,
+    activeEvent: activeEventByVenueId.get(venue.id) ?? null
+  }))
 }
 
 async function hasParticipantEventAccess(

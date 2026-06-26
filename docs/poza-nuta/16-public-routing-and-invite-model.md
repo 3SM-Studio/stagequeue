@@ -22,12 +22,12 @@ The product needs a stable routing and invite decision before the next implement
 
 The target public routing model is event-first for the participant flow and handle-first for public profiles:
 
-1. `/` remains the product home / landing page, not a global event catalog.
+1. `/` is a bounded public discovery homepage for current events, upcoming events, and visible venues.
 2. `/@:handle` is the public profile for a venue, organizer, or brand.
 3. `/event/:eventPublicId` is the main public page for a concrete event.
 4. `/invite/:inviteCode` is a magic invite link issued by an operator.
 5. Existing venue-first routes stay as legacy/MVP shortcuts until migrated.
-6. There is no global `/events` catalog in this decision.
+6. There is no separate global `/events` route in this decision.
 7. Event slugs are not the primary public event identity.
 
 This keeps the public UX shareable, stable, and privacy-aware while preserving the current MVP flow until replacement routes exist.
@@ -36,7 +36,15 @@ This keeps the public UX shareable, stable, and privacy-aware while preserving t
 
 ### `/`
 
-Product home / landing page for Poza Nuta / Stagequeue. It may explain the product and link to sign-in, dashboard, or public profiles, but it is not a global list of all live events.
+Simple public discovery homepage for Poza Nuta / Stagequeue.
+
+Rules:
+
+- show bounded sections for current public events, upcoming public events, and public venues;
+- include only events with `visibility=public`; never discover `unlisted` or `private` events;
+- keep `invite_required` events discoverable while clearly stating that joining requires the QR available at the venue;
+- use `/event/:eventPublicId` as the canonical destination for event details and participation;
+- do not add public login, search, geolocation, or homepage realtime as part of this decision.
 
 ### `/@:handle`
 

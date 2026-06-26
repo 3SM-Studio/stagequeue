@@ -263,6 +263,8 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
 }
 
 export async function registerEventPublicRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/public/discovery", async () => app.events.getPublicDiscovery())
+
   app.post("/public/invites/:inviteCode/claim", async (request, reply) => {
     const inviteCode = readParamPublicId(request.params, "inviteCode")
     const participantToken = resolveParticipantToken(request, reply)

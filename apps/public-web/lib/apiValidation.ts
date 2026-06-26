@@ -1,5 +1,8 @@
 import type {
   ActiveEventLookup,
+  PublicDiscoveryEvent,
+  PublicDiscoveryResponse,
+  PublicDiscoveryVenue,
   PublicEvent,
   PublicEventDetail,
   PublicInviteClaimResponse,
@@ -13,6 +16,26 @@ import type {
 
 type VenueResponse = {
   venue: Venue
+}
+
+export function assertPublicDiscoveryResponse(value: unknown): PublicDiscoveryResponse {
+  if (
+    !isRecordWithKeys(value, ["now", "upcoming", "venues"]) ||
+    !Array.isArray(value.now) ||
+    !value.now.every((event) => isPublicDiscoveryEvent(event, "active")) ||
+    !Array.isArray(value.upcoming) ||
+    !value.upcoming.every((event) => isPublicDiscoveryEvent(event, "scheduled")) ||
+    !Array.isArray(value.venues) ||
+    !value.venues.every(isPublicDiscoveryVenue)
+  ) {
+    throw invalidResponse("public discovery")
+  }
+
+  return {
+    now: value.now,
+    upcoming: value.upcoming,
+    venues: value.venues
+  }
 }
 
 export function assertVenueResponse(value: unknown): VenueResponse {
@@ -131,6 +154,55 @@ function isVenue(value: unknown): value is Venue {
     isString(value.status) &&
     isString(value.verificationStatus)
   )
+}
+
+function isPublicDiscoveryEvent(
+  value: unknown,
+  expectedStatus: PublicDiscoveryEvent["status"]
+): value is PublicDiscoveryEvent {
+  return (
+    isRecordWithKeys(value, ["eventPublicId", "name", "status", "startsAt", "venue", "joinState"]) &&
+    isString(value.eventPublicId) &&
+    isString(value.name) &&
+    value.status === expectedStatus &&
+    isNullableString(value.startsAt) &&
+    isPublicDiscoveryEventVenue(value.venue) &&
+    isPublicDiscoveryJoinState(value.joinState)
+  )
+}
+
+function isPublicDiscoveryEventVenue(value: unknown): value is PublicDiscoveryEvent["venue"] {
+  return (
+    isRecordWithKeys(value, ["slug", "name", "city", "timezone"]) &&
+    isString(value.slug) &&
+    isString(value.name) &&
+    isNullableString(value.city) &&
+    isString(value.timezone)
+  )
+}
+
+function isPublicDiscoveryVenue(value: unknown): value is PublicDiscoveryVenue {
+  return (
+    isRecordWithKeys(value, ["slug", "name", "city", "timezone", "activeEvent"]) &&
+    isString(value.slug) &&
+    isString(value.name) &&
+    isNullableString(value.city) &&
+    isString(value.timezone) &&
+    (value.activeEvent === null || isPublicDiscoveryVenueEvent(value.activeEvent))
+  )
+}
+
+function isPublicDiscoveryVenueEvent(value: unknown): value is NonNullable<PublicDiscoveryVenue["activeEvent"]> {
+  return (
+    isRecordWithKeys(value, ["eventPublicId", "name", "joinState"]) &&
+    isString(value.eventPublicId) &&
+    isString(value.name) &&
+    isPublicDiscoveryJoinState(value.joinState)
+  )
+}
+
+function isPublicDiscoveryJoinState(value: unknown): value is PublicDiscoveryEvent["joinState"] {
+  return isString(value) && ["open", "invite_required", "closed"].includes(value)
 }
 
 function isActiveEventVenue(value: unknown): value is ActiveEventLookup["venue"] {
@@ -272,6 +344,10 @@ function isString(value: unknown): value is string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isRecordWithKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return isRecord(value) && Object.keys(value).length === keys.length && keys.every((key) => key in value)
 }
 
 function invalidResponse(name: string): Error {
