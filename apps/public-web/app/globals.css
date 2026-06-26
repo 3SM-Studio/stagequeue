@@ -329,6 +329,130 @@ textarea {
   color: var(--muted);
 }
 
+.discovery-page {
+  display: grid;
+  gap: 3.5rem;
+  padding-top: 2rem;
+}
+
+.discovery-header {
+  max-width: 46rem;
+}
+
+.discovery-header h1 {
+  max-width: 18ch;
+  margin: 0;
+  font-size: 2.75rem;
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.discovery-header > p:last-child {
+  max-width: 38rem;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
+.discovery-section {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.discovery-section-heading h2 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: 0;
+}
+
+.discovery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.discovery-grid > li {
+  min-width: 0;
+}
+
+.discovery-card {
+  display: flex;
+  min-height: 15rem;
+  height: 100%;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1.25rem;
+}
+
+.discovery-card h3 {
+  margin: 0.35rem 0 0;
+  font-size: 1.35rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.discovery-location,
+.discovery-time {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.discovery-time {
+  margin-top: 0.75rem;
+}
+
+.discovery-card-footer,
+.discovery-active-event {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.discovery-active-event {
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.discovery-active-event p {
+  margin: 0;
+  font-weight: 800;
+}
+
+.discovery-join-state {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.discovery-join-state.open {
+  color: var(--ok);
+}
+
+.discovery-join-state.invite_required {
+  color: var(--accent-strong);
+}
+
+.discovery-venue-link {
+  width: fit-content;
+  color: var(--accent-strong);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
+.discovery-empty {
+  margin: 0;
+  padding: 1.25rem;
+  color: var(--muted);
+  box-shadow: none;
+}
+
 @media (max-width: 760px) {
   .site-header {
     align-items: flex-start;
@@ -345,5 +469,13 @@ textarea {
   .state-panel h1,
   .now-panel h1 {
     max-width: 100%;
+  }
+
+  .discovery-page {
+    gap: 2.75rem;
+  }
+
+  .discovery-header h1 {
+    font-size: 2.2rem;
   }
 }

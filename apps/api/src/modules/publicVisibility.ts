@@ -29,6 +29,14 @@ export type PublicEventDirectVisibility = {
   visibility: string
 }
 
+export type PublicJoinState = "open" | "invite_required" | "closed"
+
+export type PublicJoinStateEvent = {
+  status: string
+  publicJoinEnabled: boolean
+  joinAccessMode?: string
+}
+
 export type PublicEventContainerVisibility = {
   venue: PublicVenueVisibility
   organization: PublicOrganizationVisibility
@@ -62,6 +70,18 @@ export function assertPublicEventDirectlyVisible(
   if (event.visibility !== "public" && event.visibility !== "unlisted") {
     throw new ApiHttpError(404, "NOT_FOUND", message)
   }
+}
+
+export function computePublicJoinState(event: PublicJoinStateEvent): PublicJoinState {
+  if (event.status !== "active" || !event.publicJoinEnabled) {
+    return "closed"
+  }
+
+  if (event.joinAccessMode === "invite_required") {
+    return "invite_required"
+  }
+
+  return event.joinAccessMode === "open" ? "open" : "closed"
 }
 
 export function assertPublicQueueVisible(event: PublicQueueVisibilityEvent): void {

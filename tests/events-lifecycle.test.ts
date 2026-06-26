@@ -4,6 +4,7 @@ import { createApiApp } from "../apps/api/src/app.ts"
 import type { AuthenticatedDomainUser } from "../apps/api/src/auth/access.ts"
 import type { ApiConfig } from "../apps/api/src/config.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
+import { computePublicJoinState } from "../apps/api/src/modules/publicVisibility.ts"
 import {
   createEventsService,
   generateEventInviteCode,
@@ -752,6 +753,74 @@ test("public active-event discovery excludes unlisted and private events", async
   }
 })
 
+test("public discovery returns filtered sections without internal identifiers", async () => {
+  const db = fakeDbForPublicDiscovery()
+  const app = await createTestApp({ events: createEventsService(db.db) })
+  try {
+    const response = await app.inject({ method: "GET", url: "/public/discovery" })
+    const body = response.json()
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(
+      body.now.map((event: { eventPublicId: string; joinState: string }) => [event.eventPublicId, event.joinState]),
+      [
+        ["public-open", "open"],
+        ["public-invite", "invite_required"],
+        ["public-closed", "closed"]
+      ]
+    )
+    assert.deepEqual(
+      body.upcoming.map((event: { eventPublicId: string; joinState: string }) => [event.eventPublicId, event.joinState]),
+      [["public-scheduled", "closed"]]
+    )
+    assert.deepEqual(
+      body.venues.map((venue: { slug: string; activeEvent: { eventPublicId: string } | null }) => [
+        venue.slug,
+        venue.activeEvent?.eventPublicId ?? null
+      ]),
+      [
+        ["klub-a", "venue-public-active"],
+        ["klub-b", null]
+      ]
+    )
+    assert.deepEqual(Object.keys(body.now[0]).sort(), [
+      "eventPublicId",
+      "joinState",
+      "name",
+      "startsAt",
+      "status",
+      "venue"
+    ])
+    assert.deepEqual(Object.keys(body.now[0].venue).sort(), ["city", "name", "slug", "timezone"])
+    assert.deepEqual(Object.keys(body.venues[0]).sort(), ["activeEvent", "city", "name", "slug", "timezone"])
+    assert.equal(response.body.includes("internal-event-id"), false)
+    assert.equal(response.body.includes("organizationId"), false)
+    assert.equal(response.body.includes("inviteCode"), false)
+    assert.equal(response.body.includes("participant"), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("public discovery join state reflects current submit availability", () => {
+  assert.equal(
+    computePublicJoinState({ status: "active", publicJoinEnabled: true, joinAccessMode: "open" }),
+    "open"
+  )
+  assert.equal(
+    computePublicJoinState({ status: "active", publicJoinEnabled: true, joinAccessMode: "invite_required" }),
+    "invite_required"
+  )
+  assert.equal(
+    computePublicJoinState({ status: "active", publicJoinEnabled: false, joinAccessMode: "open" }),
+    "closed"
+  )
+  assert.equal(
+    computePublicJoinState({ status: "scheduled", publicJoinEnabled: true, joinAccessMode: "open" }),
+    "closed"
+  )
+})
+
 async function createTestApp(options: {
   user?: AuthenticatedDomainUser
   permissions?: PermissionService
@@ -895,6 +964,13 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
     },
     async userIsActiveOrganizationMember(userId) {
       return state.activeMembers.has(userId)
+    },
+    async getPublicDiscovery() {
+      return {
+        now: [],
+        upcoming: [],
+        venues: []
+      }
     },
     async getPublicActiveEventByVenueSlug(venueSlug): Promise<PublicActiveEventLookup | null> {
       if (venueSlug !== "klub-x") {
@@ -1334,6 +1410,166 @@ function fakeDbForPublicActiveEventLookup(options: {
     pool: {
       end: async () => undefined
     } as unknown as DbResources["pool"]
+  }
+}
+
+function fakeDbForPublicDiscovery(): DbResources {
+  const activeRows = [
+    discoveryEventRow("public-open", "active", "public", "open"),
+    discoveryEventRow("public-invite", "active", "public", "invite_required"),
+    discoveryEventRow("public-closed", "active", "public", "open", { publicJoinEnabled: false }),
+    discoveryEventRow("hidden-unlisted", "active", "unlisted", "open"),
+    discoveryEventRow("hidden-private", "active", "private", "open"),
+    discoveryEventRow("wrong-status", "scheduled", "public", "open"),
+    discoveryEventRow("hidden-venue", "active", "public", "open", { venueStatus: "draft" }),
+    discoveryEventRow("hidden-unverified", "active", "public", "open", { venueVerificationStatus: "pending" }),
+    discoveryEventRow("hidden-organization", "active", "public", "open", { organizationStatus: "disabled" })
+  ]
+  const upcomingRows = [
+    discoveryEventRow("public-scheduled", "scheduled", "public", "open"),
+    discoveryEventRow("upcoming-unlisted", "scheduled", "unlisted", "open"),
+    discoveryEventRow("upcoming-private", "scheduled", "private", "open"),
+    discoveryEventRow("upcoming-active", "active", "public", "open")
+  ]
+  const venueRows = [
+    discoveryVenueRow("11111111-1111-4111-8111-111111111111", "klub-a"),
+    discoveryVenueRow("22222222-2222-4222-8222-222222222222", "klub-b"),
+    discoveryVenueRow("33333333-3333-4333-8333-333333333333", "hidden-venue", { status: "draft" }),
+    discoveryVenueRow("44444444-4444-4444-8444-444444444444", "unverified-venue", {
+      verificationStatus: "pending"
+    }),
+    discoveryVenueRow("55555555-5555-4555-8555-555555555555", "inactive-org-venue", {
+      organizationStatus: "disabled"
+    })
+  ]
+  const venueEventRows = [
+    discoveryVenueEventRow("11111111-1111-4111-8111-111111111111", "venue-public-active", "public"),
+    discoveryVenueEventRow("22222222-2222-4222-8222-222222222222", "venue-unlisted-active", "unlisted"),
+    discoveryVenueEventRow("22222222-2222-4222-8222-222222222222", "venue-private-active", "private"),
+    discoveryVenueEventRow(
+      "22222222-2222-4222-8222-222222222222",
+      "venue-inactive-organization",
+      "public",
+      "disabled"
+    )
+  ]
+  let selectCount = 0
+
+  return {
+    db: {
+      select: () => {
+        selectCount += 1
+        const rowsBySelect: unknown[][] = [activeRows, upcomingRows, venueRows, venueEventRows]
+        return discoveryQueryChain(rowsBySelect[selectCount - 1] ?? [])
+      }
+    } as unknown as DbResources["db"],
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"]
+  }
+}
+
+function discoveryEventRow(
+  publicId: string,
+  status: string,
+  visibility: "public" | "unlisted" | "private",
+  joinAccessMode: "open" | "invite_required",
+  options: {
+    publicJoinEnabled?: boolean
+    venueStatus?: string
+    venueVerificationStatus?: string
+    organizationStatus?: string
+  } = {}
+) {
+  return {
+    event: {
+      publicId,
+      name: `Event ${publicId}`,
+      status,
+      visibility,
+      startsAt: new Date("2026-07-01T18:00:00.000Z"),
+      publicJoinEnabled: options.publicJoinEnabled ?? true,
+      joinAccessMode
+    },
+    venue: {
+      slug: "klub-x",
+      name: "Klub X",
+      city: "Warszawa",
+      timezone: "Europe/Warsaw",
+      status: options.venueStatus ?? "active",
+      verificationStatus: options.venueVerificationStatus ?? "verified"
+    },
+    organization: {
+      status: options.organizationStatus ?? "active"
+    }
+  }
+}
+
+function discoveryVenueRow(
+  id: string,
+  slug: string,
+  options: {
+    status?: string
+    verificationStatus?: string
+    organizationStatus?: string
+  } = {}
+) {
+  return {
+    id,
+    slug,
+    name: `Venue ${slug}`,
+    city: "Warszawa",
+    timezone: "Europe/Warsaw",
+    status: options.status ?? "active",
+    verificationStatus: options.verificationStatus ?? "verified",
+    organization: {
+      status: options.organizationStatus ?? "active"
+    }
+  }
+}
+
+function discoveryVenueEventRow(
+  venueId: string,
+  publicId: string,
+  visibility: "public" | "unlisted" | "private",
+  organizationStatus = "active"
+) {
+  return {
+    venueId,
+    event: {
+      publicId,
+      name: `Event ${publicId}`,
+      status: "active",
+      visibility,
+      publicJoinEnabled: true,
+      joinAccessMode: "invite_required"
+    },
+    organization: {
+      status: organizationStatus
+    }
+  }
+}
+
+function discoveryQueryChain<T>(result: T[]) {
+  return {
+    from() {
+      return this
+    },
+    innerJoin() {
+      return this
+    },
+    where() {
+      return this
+    },
+    orderBy() {
+      return this
+    },
+    limit() {
+      return result
+    },
+    then(resolve: (value: T[]) => unknown) {
+      return Promise.resolve(result).then(resolve)
+    }
   }
 }
 

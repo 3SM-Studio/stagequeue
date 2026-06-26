@@ -12,11 +12,16 @@ import {
   getPublicEventDetail,
   getPublicQueue,
   getPublicQueueByVenueSlug,
+  type PublicDiscoveryResponse,
   type PublicEventDetail,
   type PublicMyRequest,
   submitSongRequest,
   submitSongRequestByVenueSlug
 } from "../apps/public-web/lib/apiClient.ts"
+import {
+  formatDiscoveryStart,
+  getDiscoveryJoinLabel
+} from "../apps/public-web/lib/discoveryPresentation.ts"
 import { getJoinVisibility } from "../apps/public-web/lib/joinVisibility.ts"
 import {
   getPublicJoinStreamErrorState,
@@ -32,15 +37,25 @@ import {
   PUBLIC_MY_REQUESTS_REFRESH_INTERVAL_MS,
   shouldPollMyRequests
 } from "../apps/public-web/lib/myRequestsState.ts"
-import { getPublicEventPageData, getVenueMetadataData, getVenuePageData } from "../apps/public-web/lib/pageData.ts"
+import {
+  getPublicDiscoveryPageData,
+  getPublicEventPageData,
+  getVenueMetadataData,
+  getVenuePageData
+} from "../apps/public-web/lib/pageData.ts"
 import { getPublicEventPageState } from "../apps/public-web/lib/publicEventPageState.ts"
 import { shouldRefetchQueue } from "../apps/public-web/lib/queueRefresh.ts"
 import { createRefetchScheduler as createPublicRefetchScheduler } from "../apps/public-web/lib/refetchScheduler.ts"
-import { getServerApiBaseUrl, getServerPublicQueueByVenueSlug } from "../apps/public-web/lib/serverApiClient.ts"
+import {
+  fetchPublicDiscovery,
+  getServerApiBaseUrl,
+  getServerPublicQueueByVenueSlug
+} from "../apps/public-web/lib/serverApiClient.ts"
 import { isReservedPublicPathSlug } from "../apps/public-web/lib/staticSlugGuard.ts"
 import { validateSubmitSongRequest } from "../apps/public-web/lib/submitValidation.ts"
 import {
   assertActiveEventResponse,
+  assertPublicDiscoveryResponse,
   assertMyRequestsResponse,
   assertPublicInviteClaimResponse,
   assertPublicEventDetailResponse,
@@ -84,6 +99,24 @@ test("public-web API client builds event-first public event detail URL", async (
 
     assert.equal(detail.event.name, "Friday Karaoke")
     assert.equal(requestedUrl.endsWith("/public/events/ka2Md-d1das"), true)
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
+test("public-web server client fetches the discovery endpoint", async () => {
+  const previousFetch = globalThis.fetch
+  let requestedUrl = ""
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input)
+    return jsonResponse(validPublicDiscoveryResponse())
+  }
+
+  try {
+    const discovery = await fetchPublicDiscovery()
+
+    assert.equal(requestedUrl.endsWith("/public/discovery"), true)
+    assert.equal(discovery.now[0]?.eventPublicId, "active-public-event")
   } finally {
     globalThis.fetch = previousFetch
   }
@@ -246,6 +279,23 @@ test("public-web event page loader maps private event not found response to its 
   }
 })
 
+test("public-web discovery page data maps API failure to controlled error state", async () => {
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    jsonResponse({ error: { code: "API_UNAVAILABLE", message: "Unavailable" } }, 503)
+
+  try {
+    const data = await getPublicDiscoveryPageData()
+
+    assert.deepEqual(data, {
+      kind: "api-error",
+      message: "Spróbuj odświeżyć stronę za chwilę."
+    })
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
 test("public-web reserved static slugs do not call the public venue API", async () => {
   const previousFetch = globalThis.fetch
   const reservedSlugs = ["sw.js", "favicon.ico", "robots.txt", "sitemap.xml", "manifest.webmanifest", "_next", "assets"]
@@ -300,6 +350,26 @@ test("public-web validates public event detail API responses", () => {
         publicQueue: { visible: "yes" }
       }),
     /Invalid public API response: public event detail/
+  )
+})
+
+test("public-web validates discovery response and rejects internal identifiers", () => {
+  const discovery = assertPublicDiscoveryResponse(validPublicDiscoveryResponse())
+
+  assert.equal(discovery.now[0]?.joinState, "open")
+  assert.equal(discovery.upcoming[0]?.joinState, "closed")
+  assert.throws(
+    () =>
+      assertPublicDiscoveryResponse({
+        ...validPublicDiscoveryResponse(),
+        now: [
+          {
+            ...validPublicDiscoveryResponse().now[0],
+            id: "11111111-1111-4111-8111-111111111111"
+          }
+        ]
+      }),
+    /Invalid public API response: public discovery/
   )
 })
 
@@ -799,6 +869,33 @@ test("public-web homepage does not link to the missing demo venue", () => {
   assert.equal(source.includes('href="/demo"'), false)
 })
 
+test("public-web discovery homepage exposes sections safe CTAs and empty states", () => {
+  const source = readFileSync("apps/public-web/app/page.tsx", "utf8")
+
+  for (const heading of ["Trwa teraz", "Nadchodzące", "Lokale"]) {
+    assert.match(source, new RegExp(`>${heading}<`))
+  }
+  for (const emptyState of [
+    "Aktualnie nie trwa żadne publiczne wydarzenie.",
+    "Brak zaplanowanych publicznych wydarzeń.",
+    "Brak publicznych lokali.",
+    "Brak aktywnego wydarzenia"
+  ]) {
+    assert.equal(source.includes(emptyState), true)
+  }
+  assert.equal(source.includes("Zobacz wydarzenie"), true)
+  assert.equal(source.includes("Dodaj piosenkę"), false)
+  assert.equal(source.includes("Venue-first MVP"), false)
+})
+
+test("public-web discovery presentation maps join labels and venue timezone", () => {
+  assert.equal(getDiscoveryJoinLabel("open"), "Otwarte zgłoszenia")
+  assert.equal(getDiscoveryJoinLabel("invite_required"), "Dołącz przez QR w lokalu")
+  assert.equal(getDiscoveryJoinLabel("closed"), "Zgłoszenia zamknięte")
+  assert.match(formatDiscoveryStart("2026-07-01T18:00:00.000Z", "Europe/Warsaw") ?? "", /20:00/)
+  assert.equal(formatDiscoveryStart(null, "Europe/Warsaw"), null)
+})
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -882,6 +979,74 @@ function validPublicEventDetailResponse(): PublicEventDetail {
     publicQueue: {
       visible: true
     }
+  }
+}
+
+function validPublicDiscoveryResponse(): PublicDiscoveryResponse {
+  return {
+    now: [
+      {
+        eventPublicId: "active-public-event",
+        name: "Friday Karaoke",
+        status: "active",
+        startsAt: "2026-07-01T18:00:00.000Z",
+        venue: {
+          slug: "klub-x",
+          name: "Klub X",
+          city: "Warszawa",
+          timezone: "Europe/Warsaw"
+        },
+        joinState: "open"
+      },
+      {
+        eventPublicId: "invite-public-event",
+        name: "QR Karaoke",
+        status: "active",
+        startsAt: null,
+        venue: {
+          slug: "klub-y",
+          name: "Klub Y",
+          city: null,
+          timezone: "Europe/Warsaw"
+        },
+        joinState: "invite_required"
+      }
+    ],
+    upcoming: [
+      {
+        eventPublicId: "scheduled-public-event",
+        name: "Saturday Karaoke",
+        status: "scheduled",
+        startsAt: "2026-07-02T18:00:00.000Z",
+        venue: {
+          slug: "klub-x",
+          name: "Klub X",
+          city: "Warszawa",
+          timezone: "Europe/Warsaw"
+        },
+        joinState: "closed"
+      }
+    ],
+    venues: [
+      {
+        slug: "klub-x",
+        name: "Klub X",
+        city: "Warszawa",
+        timezone: "Europe/Warsaw",
+        activeEvent: {
+          eventPublicId: "active-public-event",
+          name: "Friday Karaoke",
+          joinState: "open"
+        }
+      },
+      {
+        slug: "klub-y",
+        name: "Klub Y",
+        city: null,
+        timezone: "Europe/Warsaw",
+        activeEvent: null
+      }
+    ]
   }
 }
 

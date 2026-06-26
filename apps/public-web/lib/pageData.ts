@@ -1,5 +1,18 @@
-import { PublicApiError, type ActiveEventLookup, type PublicEventDetail, type PublicQueue, type Venue } from "./apiClient.ts"
-import { getActiveEvent, getServerPublicEventDetail, getServerPublicQueue, getVenue } from "./serverApiClient.ts"
+import {
+  PublicApiError,
+  type ActiveEventLookup,
+  type PublicDiscoveryResponse,
+  type PublicEventDetail,
+  type PublicQueue,
+  type Venue
+} from "./apiClient.ts"
+import {
+  fetchPublicDiscovery,
+  getActiveEvent,
+  getServerPublicEventDetail,
+  getServerPublicQueue,
+  getVenue
+} from "./serverApiClient.ts"
 
 export type VenuePageData =
   | {
@@ -28,6 +41,30 @@ export type PublicEventPageData =
       kind: "api-error"
       message: string
     }
+
+export type PublicDiscoveryPageData =
+  | {
+      kind: "ready"
+      discovery: PublicDiscoveryResponse
+    }
+  | {
+      kind: "api-error"
+      message: string
+    }
+
+export async function getPublicDiscoveryPageData(): Promise<PublicDiscoveryPageData> {
+  try {
+    return {
+      kind: "ready",
+      discovery: await fetchPublicDiscovery()
+    }
+  } catch {
+    return {
+      kind: "api-error",
+      message: "Spróbuj odświeżyć stronę za chwilę."
+    }
+  }
+}
 
 export async function getVenuePageData(venueSlug: string): Promise<VenuePageData> {
   try {

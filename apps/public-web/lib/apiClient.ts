@@ -149,6 +149,40 @@ export type PublicInviteClaimResponse = {
   redirectTo: string
 }
 
+export type PublicDiscoveryJoinState = "open" | "invite_required" | "closed"
+
+export type PublicDiscoveryEvent = {
+  eventPublicId: string
+  name: string
+  status: "active" | "scheduled"
+  startsAt: string | null
+  venue: {
+    slug: string
+    name: string
+    city: string | null
+    timezone: string
+  }
+  joinState: PublicDiscoveryJoinState
+}
+
+export type PublicDiscoveryVenue = {
+  slug: string
+  name: string
+  city: string | null
+  timezone: string
+  activeEvent: {
+    eventPublicId: string
+    name: string
+    joinState: PublicDiscoveryJoinState
+  } | null
+}
+
+export type PublicDiscoveryResponse = {
+  now: PublicDiscoveryEvent[]
+  upcoming: PublicDiscoveryEvent[]
+  venues: PublicDiscoveryVenue[]
+}
+
 export type ApiErrorBody = {
   error?: {
     code?: string
