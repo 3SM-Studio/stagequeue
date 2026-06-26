@@ -143,6 +143,102 @@ test("create event maps duplicate venue slug to controlled conflict", async () =
   }
 })
 
+test("create active event succeeds when venue has no active or paused event", async () => {
+  const db = fakeDbForCreateEvent()
+  const created = await createEventsService(db.db).createEvent(createEventInput("active"))
+
+  assert.equal(created.status, "active")
+  assert.equal(db.runningChecks, 1)
+  assert.equal(db.eventInserts, 1)
+})
+
+for (const existingStatus of ["active", "paused"] as const) {
+  test(`create active event returns controlled conflict when venue has ${existingStatus} event`, async () => {
+    const db = fakeDbForCreateEvent({ runningStatus: existingStatus })
+    const app = await createTestApp({
+      events: createEventsService(db.db),
+      permissions: fakePermissions({ venue: new Set(["venue.create_event"]) })
+    })
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/dashboard/events",
+        payload: eventPayload("second-event", "active")
+      })
+      const body = response.json()
+
+      assert.equal(response.statusCode, 409)
+      assert.equal(body.error.code, "VENUE_HAS_ACTIVE_EVENT")
+      assert.equal(JSON.stringify(body).includes("events_one_active_or_paused_per_venue_unique"), false)
+      assert.equal(db.eventInserts, 0)
+    } finally {
+      await app.close()
+    }
+  })
+}
+
+for (const requestedStatus of ["draft", "scheduled"] as const) {
+  for (const existingStatus of ["active", "paused"] as const) {
+    test(`create ${requestedStatus} event succeeds when venue has ${existingStatus} event`, async () => {
+      const db = fakeDbForCreateEvent({ runningStatus: existingStatus })
+      const created = await createEventsService(db.db).createEvent(createEventInput(requestedStatus))
+
+      assert.equal(created.status, requestedStatus)
+      assert.equal(db.runningChecks, 0)
+      assert.equal(db.eventInserts, 1)
+    })
+  }
+}
+
+test("create event without status defaults to draft", async () => {
+  const app = await createTestApp({
+    events: createInMemoryEventsService(),
+    permissions: fakePermissions({ venue: new Set(["venue.create_event"]) })
+  })
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: {
+        venueId: VENUE_ID,
+        operatedByOrganizationId: ORG_ID,
+        name: "Draft by default",
+        slug: "draft-by-default"
+      }
+    })
+
+    assert.equal(response.statusCode, 201)
+    assert.equal(response.json().event.status, "draft")
+  } finally {
+    await app.close()
+  }
+})
+
+test("create event maps running-event unique violation to controlled conflict", async () => {
+  const db = fakeDbForCreateEvent({ uniqueViolationOnInsert: true })
+  const app = await createTestApp({
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ venue: new Set(["venue.create_event"]) })
+  })
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: eventPayload("race-event", "active")
+    })
+    const body = response.json()
+
+    assert.equal(response.statusCode, 409)
+    assert.equal(body.error.code, "VENUE_HAS_ACTIVE_EVENT")
+    assert.equal(JSON.stringify(body).includes("events_one_active_or_paused_per_venue_unique"), false)
+  } finally {
+    await app.close()
+  }
+})
+
 test("event public id generator returns short URL-safe identifiers", () => {
   const publicId = generateEventPublicId()
 
@@ -858,6 +954,17 @@ function eventPayload(slug: string, status = "draft") {
   }
 }
 
+function createEventInput(status: "draft" | "scheduled" | "active") {
+  return {
+    venueId: VENUE_ID,
+    operatedByOrganizationId: ORG_ID,
+    createdByUserId: USER_ID,
+    name: `Event ${status}`,
+    slug: `event-${status}`,
+    status
+  }
+}
+
 function requiredEvent(state: InMemoryEventsState, eventId: string): EventSummary {
   const event = state.events.get(eventId)
   if (!event) {
@@ -1015,6 +1122,63 @@ function fakeDbForLifecycleUniqueRunningEventConflict(): DbResources {
       end: async () => undefined
     } as unknown as DbResources["pool"]
   }
+}
+
+function fakeDbForCreateEvent(
+  options: {
+    runningStatus?: "active" | "paused"
+    uniqueViolationOnInsert?: boolean
+  } = {}
+): DbResources & { eventInserts: number; runningChecks: number } {
+  let selectCount = 0
+  let insertCount = 0
+  const resources: DbResources & { eventInserts: number; runningChecks: number } = {
+    eventInserts: 0,
+    runningChecks: 0,
+    db: {
+      select: () => {
+        selectCount += 1
+        if (selectCount === 1) {
+          return queryChain([{ id: "venue-access" }])
+        }
+
+        resources.runningChecks += 1
+        return queryChain(options.runningStatus ? [{ id: EVENT_ID, status: options.runningStatus }] : [])
+      },
+      insert: () => {
+        insertCount += 1
+        return {
+          values: (values: Record<string, unknown>) => {
+            if (insertCount === 1) {
+              resources.eventInserts += 1
+              if (options.uniqueViolationOnInsert) {
+                throw { code: "23505", constraint: "events_one_active_or_paused_per_venue_unique" }
+              }
+
+              const status = String(values.status)
+              return {
+                returning: () => [
+                  {
+                    ...makeEvent(EVENT_ID, String(values.slug), status),
+                    ...values,
+                    endsAt: values.endsAt ?? null,
+                    startsAt: values.startsAt ?? null
+                  }
+                ]
+              }
+            }
+
+            return undefined
+          }
+        }
+      }
+    } as unknown as DbResources["db"],
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"]
+  }
+
+  return resources
 }
 
 function fakeDbForPatchEvent(initial: EventSummary): DbResources & { updated: boolean } {

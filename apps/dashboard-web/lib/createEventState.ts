@@ -90,10 +90,13 @@ export function mapCreateEventError(error: unknown): string {
       return "Ten slug jest juz zajety w wybranym lokalu."
     }
     if (error.status === 409 && error.code === "VENUE_HAS_ACTIVE_EVENT") {
-      return "Ten lokal ma juz aktywne albo wstrzymane wydarzenie."
+      return "Ten lokal ma już aktywne wydarzenie. Zamknij je albo utwórz nowe jako szkic/zaplanowane."
     }
     if (error.status === 400) {
       return error.message || "Sprawdz dane wydarzenia."
+    }
+    if (error.status >= 400 && error.status < 500) {
+      return error.message || "Nie udalo sie utworzyc wydarzenia. Sprawdz dane i sprobuj ponownie."
     }
   }
 

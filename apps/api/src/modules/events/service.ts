@@ -289,6 +289,9 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         throw new ApiHttpError(403, "FORBIDDEN", "Organization does not have active access to this venue")
       }
       validateEventDates(input.startsAt, input.endsAt)
+      if (["active", "paused"].includes(input.status) && (await venueHasRunningEvent(db, input.venueId))) {
+        throw new ApiHttpError(409, "VENUE_HAS_ACTIVE_EVENT", "Venue already has an active or paused event")
+      }
 
       const rows = await inTransaction(db, async (tx) => {
         const inserted = await insertEventWithGeneratedPublicId(tx, {
@@ -741,11 +744,17 @@ async function getEventForUpdate(db: DbClient, eventId: string): Promise<EventSu
   return rows[0]
 }
 
-async function venueHasRunningEvent(db: DbClient, venueId: string, exceptEventId: string): Promise<boolean> {
+async function venueHasRunningEvent(db: DbClient, venueId: string, exceptEventId?: string): Promise<boolean> {
   const rows = await db
     .select({ id: events.id })
     .from(events)
-    .where(and(eq(events.venueId, venueId), ne(events.id, exceptEventId), inArray(events.status, ["active", "paused"])))
+    .where(
+      and(
+        eq(events.venueId, venueId),
+        exceptEventId ? ne(events.id, exceptEventId) : undefined,
+        inArray(events.status, ["active", "paused"])
+      )
+    )
     .limit(1)
 
   return rows.length > 0
