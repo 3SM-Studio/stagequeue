@@ -232,6 +232,20 @@ test("public-web event page loader forwards participant cookie to event detail",
   }
 })
 
+test("public-web event page loader maps private event not found response to its existing 404 state", async () => {
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    jsonResponse({ error: { code: "NOT_FOUND", message: "Missing event" } }, 404)
+
+  try {
+    const data = await getPublicEventPageData("privateEvent1")
+
+    assert.deepEqual(data, { kind: "not-found" })
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
 test("public-web reserved static slugs do not call the public venue API", async () => {
   const previousFetch = globalThis.fetch
   const reservedSlugs = ["sw.js", "favicon.ico", "robots.txt", "sitemap.xml", "manifest.webmanifest", "_next", "assets"]
@@ -571,6 +585,7 @@ test("public-web join page policy closes the form when publicJoinEnabled is fals
     name: "Closed Join",
     slug: "closed-join",
     status: "active",
+    visibility: "public",
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: false,
@@ -605,7 +620,18 @@ test("public-web invite-required event without access maps to access required st
     }
   })
 
-  assert.equal(state.submissionsLabel, "Zgloszenia wymagaja linku z zaproszeniem")
+  assert.equal(state.submissionsLabel, "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu.")
+})
+
+test("public-web invite-required state renders QR guidance instead of JoinForm", () => {
+  const source = readFileSync("apps/public-web/components/PublicEventParticipantView.tsx", "utf8")
+  const accessRequiredBranch = source.slice(
+    source.indexOf('detail.submissions.reason === "ACCESS_REQUIRED"'),
+    source.indexOf(") : (", source.indexOf('detail.submissions.reason === "ACCESS_REQUIRED"'))
+  )
+
+  assert.match(accessRequiredBranch, /<p>\{state\.submissionsLabel\}<\/p>/)
+  assert.doesNotMatch(accessRequiredBranch, /<JoinForm/)
 })
 
 test("public-web join disabled stays disabled even for invite-required event", () => {
@@ -631,6 +657,7 @@ test("public-web join page policy does not open the form for paused events", () 
     name: "Paused Join",
     slug: "paused-join",
     status: "paused",
+    visibility: "public",
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
@@ -815,6 +842,7 @@ function validActiveEventResponse() {
       name: "Friday Karaoke",
       slug: "friday-karaoke",
       status: "active",
+      visibility: "public" as const,
       startsAt: null,
       endsAt: null,
       publicJoinEnabled: true,
@@ -831,6 +859,7 @@ function validPublicEventDetailResponse(): PublicEventDetail {
       name: "Friday Karaoke",
       slug: "friday-karaoke",
       status: "active",
+      visibility: "public",
       startsAt: null,
       endsAt: null,
       publicJoinEnabled: true,

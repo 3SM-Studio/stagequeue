@@ -65,6 +65,7 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     const publicJoinEnabled = readOptionalBoolean(body, "publicJoinEnabled")
     const publicQueueEnabled = readOptionalBoolean(body, "publicQueueEnabled")
     const joinAccessMode = readOptionalEnum(body, "joinAccessMode", ["open", "invite_required"])
+    const visibility = readOptionalEnum(body, "visibility", ["public", "unlisted", "private"])
     if (startsAt !== undefined) {
       createInput.startsAt = startsAt
     }
@@ -79,6 +80,9 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     }
     if (joinAccessMode !== undefined) {
       createInput.joinAccessMode = joinAccessMode
+    }
+    if (visibility !== undefined) {
+      createInput.visibility = visibility
     }
 
     const created = await app.events.createEvent(createInput)
@@ -129,6 +133,7 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     const publicJoinEnabled = readOptionalBoolean(body, "publicJoinEnabled")
     const publicQueueEnabled = readOptionalBoolean(body, "publicQueueEnabled")
     const joinAccessMode = readOptionalEnum(body, "joinAccessMode", ["open", "invite_required"])
+    const visibility = readOptionalEnum(body, "visibility", ["public", "unlisted", "private"])
     if (name !== undefined) {
       patchInput.name = name
     }
@@ -149,6 +154,9 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     }
     if (joinAccessMode !== undefined) {
       patchInput.joinAccessMode = joinAccessMode
+    }
+    if (visibility !== undefined) {
+      patchInput.visibility = visibility
     }
 
     const event = await app.events.patchEvent(eventId, patchInput)

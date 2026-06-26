@@ -30,6 +30,7 @@ export const venueAccessStatuses = ["pending", "active", "revoked", "expired", "
 export const eventStatuses = ["draft", "scheduled", "active", "paused", "closed", "archived", "cancelled"] as const
 export const eventInviteStatuses = ["active", "revoked"] as const
 export const eventJoinAccessModes = ["open", "invite_required"] as const
+export const eventVisibilities = ["public", "unlisted", "private"] as const
 export const eventStaffRoles = ["lead_host", "host", "queue_operator", "viewer"] as const
 export const eventStaffStatuses = ["active", "removed"] as const
 export const songRequestStatuses = ["pending", "approved", "now", "done", "skipped", "rejected"] as const
@@ -66,6 +67,7 @@ export type OrganizationStatus = (typeof organizationStatuses)[number]
 export type OrganizationMemberRole = (typeof organizationMemberRoles)[number]
 export type EventStatus = (typeof eventStatuses)[number]
 export type EventJoinAccessMode = (typeof eventJoinAccessModes)[number]
+export type EventVisibility = (typeof eventVisibilities)[number]
 export type SongRequestStatus = (typeof songRequestStatuses)[number]
 export type CatalogImportStatus = (typeof catalogImportStatuses)[number]
 export type PlatformRole = (typeof platformRoles)[number]
@@ -296,6 +298,7 @@ export const events = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     status: text("status").notNull().default("draft"),
+    visibility: text("visibility", { enum: eventVisibilities }).notNull().default("public"),
     startsAt: timestamp("starts_at", { withTimezone: true }),
     endsAt: timestamp("ends_at", { withTimezone: true }),
     publicJoinEnabled: boolean("public_join_enabled").notNull().default(true),
@@ -314,6 +317,7 @@ export const events = pgTable(
       "events_status_check",
       sql`${table.status} in ('draft', 'scheduled', 'active', 'paused', 'closed', 'archived', 'cancelled')`
     ),
+    check("events_visibility_check", sql`${table.visibility} in ('public', 'unlisted', 'private')`),
     check("events_join_access_mode_check", sql`${table.joinAccessMode} in ('open', 'invite_required')`)
   ]
 )

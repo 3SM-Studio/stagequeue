@@ -244,6 +244,22 @@ test("public stream is forbidden when publicQueueEnabled is false", async () => 
   }
 })
 
+test("private event stream returns controlled not found without subscribing", async () => {
+  const app = await createTestApp({
+    event: makeEvent("active", "private")
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/public/events/${EVENT_PUBLIC_ID}/stream` })
+
+    assert.equal(response.statusCode, 404)
+    assert.equal(response.json().error.code, "NOT_FOUND")
+    assert.equal(response.json().error.message, "Missing event")
+    assert.equal(app.eventBus.subscriberCount(app.eventBus.eventChannel(EVENT_ID)), 0)
+  } finally {
+    await app.close()
+  }
+})
+
 test("public stream is hidden for archived and cancelled events", async () => {
   for (const status of ["archived", "cancelled"]) {
     const app = await createTestApp({
@@ -612,7 +628,10 @@ function makeRequest(status: string): QueueSongRequest {
   }
 }
 
-function makeEvent(status: string): EventSummary {
+function makeEvent(
+  status: string,
+  visibility: "public" | "unlisted" | "private" = "public"
+): EventSummary {
   return {
     id: EVENT_ID,
     publicId: "sseEvent1",
@@ -622,6 +641,7 @@ function makeEvent(status: string): EventSummary {
     name: "SSE Event",
     slug: "sse-event",
     status,
+    visibility,
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
@@ -666,12 +686,13 @@ function fakeEventsService(event: EventSummary | null = makeEvent("active")): Ap
   return {
     getById: async () => event,
     resolvePublicEventByPublicId: async (eventPublicId: string) =>
-      event && event.publicId === eventPublicId
+      event && event.publicId === eventPublicId && event.visibility !== "private"
         ? {
             id: event.id,
             publicId: event.publicId,
             venueId: event.venueId,
             status: event.status,
+            visibility: event.visibility,
             publicJoinEnabled: event.publicJoinEnabled,
             publicQueueEnabled: event.publicQueueEnabled,
             joinAccessMode: event.joinAccessMode
@@ -681,7 +702,7 @@ function fakeEventsService(event: EventSummary | null = makeEvent("active")): Ap
       venueSlug === "klub-x"
         ? {
             venue: { id: VENUE_ID, slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
-            activeEvent: event
+            activeEvent: event?.visibility === "public" ? event : null
           }
         : null
   } as unknown as ApiModuleServices["events"]
@@ -723,6 +744,7 @@ function fakeDbResources(
                 operatedByOrganizationId: event.operatedByOrganizationId,
                 name: event.name,
                 status: event.status,
+                visibility: event.visibility,
                 publicJoinEnabled: event.publicJoinEnabled,
                 publicQueueEnabled: event.publicQueueEnabled,
                 joinAccessMode: event.joinAccessMode

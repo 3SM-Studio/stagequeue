@@ -162,6 +162,17 @@ Direct `/event/:eventPublicId` access and invite access are separate:
 - rotating an invite changes the usable invite link/code by revoking the old code and issuing a new active code for the event.
 - neither revoke nor rotate removes rows from `participant_event_access`; participant access revoke is a separate future capability.
 
+Event visibility and join access are separate dimensions:
+
+- `visibility=public` allows direct event access and future public discovery;
+- `visibility=unlisted` allows direct event access by `eventPublicId`, but venue active-event lookup and future discovery must not expose it;
+- `visibility=private` is hidden from public detail, queue, submit, my-requests, stream, and invite claim routes with a controlled not-found response;
+- `publicJoinEnabled=false` means effective join policy `closed`;
+- `publicJoinEnabled=true` with `joinAccessMode=open` means effective join policy `open`;
+- `publicJoinEnabled=true` with `joinAccessMode=invite_required` means effective join policy `invite_required` and requires `participant_event_access`.
+
+`invite_required` does not make an event hidden. A public or unlisted invite-required event remains visible through its direct event URL while submit stays blocked until access is granted.
+
 Rules:
 
 - `publicJoinEnabled=false` blocks the join form even for invited or already joined participants.

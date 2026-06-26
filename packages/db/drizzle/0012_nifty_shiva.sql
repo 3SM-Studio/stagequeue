@@ -1,0 +1,2 @@
+ALTER TABLE "events" ADD COLUMN "visibility" text DEFAULT 'public' NOT NULL;--> statement-breakpoint
+ALTER TABLE "events" ADD CONSTRAINT "events_visibility_check" CHECK ("events"."visibility" in ('public', 'unlisted', 'private'));

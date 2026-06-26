@@ -11,7 +11,11 @@ import {
 import { and, asc, desc, eq, sql } from "drizzle-orm"
 import { ApiHttpError } from "../../errors.ts"
 import type { DomainEventBus } from "../../plugins/eventBus.ts"
-import { assertPublicEventContainerVisible, assertPublicQueueVisible } from "../publicVisibility.ts"
+import {
+  assertPublicEventContainerVisible,
+  assertPublicEventDirectlyVisible,
+  assertPublicQueueVisible
+} from "../publicVisibility.ts"
 
 export type QueueSongRequest = {
   id: string
@@ -41,6 +45,7 @@ export type PublicQueueResponse = {
     publicId: string
     name: string
     status: string
+    visibility: string
   } | null
   activeEvent?: {
     id: string
@@ -495,6 +500,7 @@ async function getEventContext(db: DbClient, eventId: string) {
         operatedByOrganizationId: events.operatedByOrganizationId,
         name: events.name,
         status: events.status,
+        visibility: events.visibility,
         publicJoinEnabled: events.publicJoinEnabled,
         publicQueueEnabled: events.publicQueueEnabled,
         joinAccessMode: events.joinAccessMode
@@ -552,6 +558,7 @@ async function getPublicEventContext(db: DbClient, eventId: string): Promise<Awa
 
 function assertPublicEventContextVisible(context: Awaited<ReturnType<typeof getEventContext>>): void {
   assertPublicEventContainerVisible(context)
+  assertPublicEventDirectlyVisible(context.event)
 }
 
 async function requireMutableEvent(db: DbClient, eventId: string): Promise<Awaited<ReturnType<typeof getEventContext>>> {
@@ -751,7 +758,8 @@ function publicEvent(context: Awaited<ReturnType<typeof getEventContext>>) {
   return {
     publicId: context.event.publicId,
     name: context.event.name,
-    status: context.event.status
+    status: context.event.status,
+    visibility: context.event.visibility
   }
 }
 

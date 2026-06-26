@@ -108,7 +108,7 @@ export function PublicEventParticipantView({
         ) : detail.submissions.reason === "ACCESS_REQUIRED" ? (
           <>
             <h2>Wymagane zaproszenie</h2>
-            <p>Ten event przyjmuje zgloszenia tylko po wejsciu przez aktywny link zaproszenia.</p>
+            <p>{state.submissionsLabel}</p>
           </>
         ) : (
           <>

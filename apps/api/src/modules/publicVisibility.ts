@@ -19,9 +19,14 @@ export type PublicQueueVisibilityEvent = {
 
 export type PublicEventDetailVisibilityEvent = {
   status: string
+  visibility: string
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
   joinAccessMode?: string
+}
+
+export type PublicEventDirectVisibility = {
+  visibility: string
 }
 
 export type PublicEventContainerVisibility = {
@@ -46,6 +51,19 @@ export function assertPublicEventContainerVisible(
   }
 }
 
+export function isPublicEventDiscoverable(event: PublicEventDirectVisibility): boolean {
+  return event.visibility === "public"
+}
+
+export function assertPublicEventDirectlyVisible(
+  event: PublicEventDirectVisibility,
+  message = "Missing event"
+): void {
+  if (event.visibility !== "public" && event.visibility !== "unlisted") {
+    throw new ApiHttpError(404, "NOT_FOUND", message)
+  }
+}
+
 export function assertPublicQueueVisible(event: PublicQueueVisibilityEvent): void {
   if (!event.publicQueueEnabled) {
     throw new ApiHttpError(403, "FORBIDDEN", "Public queue is disabled for this event")
@@ -57,6 +75,7 @@ export function assertPublicQueueVisible(event: PublicQueueVisibilityEvent): voi
 }
 
 export function assertPublicEventDetailVisible(event: PublicEventDetailVisibilityEvent): void {
+  assertPublicEventDirectlyVisible(event)
   if (!publicEventDetailVisibleStatuses.includes(event.status as (typeof publicEventDetailVisibleStatuses)[number])) {
     throw new ApiHttpError(404, "NOT_FOUND", "Missing event")
   }

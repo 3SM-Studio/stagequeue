@@ -326,6 +326,7 @@ function toPublicActiveEvent(event: Awaited<ReturnType<typeof requireVenueActive
     name: event.name,
     slug: event.slug,
     status: event.status,
+    visibility: event.visibility,
     startsAt: event.startsAt,
     endsAt: event.endsAt,
     publicJoinEnabled: event.publicJoinEnabled,
