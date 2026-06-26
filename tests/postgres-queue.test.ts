@@ -520,141 +520,212 @@ test("public submit is blocked when publicJoinEnabled is false", async () => {
   }
 })
 
-test("open event allows public submit without invite access", async () => {
-  const db = fakeDbForQueueSubmit({ joinAccessMode: "open" })
-  const app = await createTestApp({
-    db,
-    queue: createQueueService(db.db)
-  })
-  try {
-    const response = await app.inject({
-      method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
-      payload: publicSubmitPayload()
+test("open public and unlisted events allow public submit without invite access", async () => {
+  for (const visibility of ["public", "unlisted"] as const) {
+    const db = fakeDbForQueueSubmit({ joinAccessMode: "open", visibility })
+    const app = await createTestApp({
+      db,
+      queue: createQueueService(db.db)
     })
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+        payload: publicSubmitPayload()
+      })
 
-    assert.equal(response.statusCode, 201)
-    assert.equal(db.state.requests.length, 1)
-  } finally {
-    await app.close()
+      assert.equal(response.statusCode, 201)
+      assert.equal(db.state.requests.length, 1)
+    } finally {
+      await app.close()
+    }
   }
 })
 
-test("invite-required event rejects public submit without participant access", async () => {
-  const db = fakeDbForQueueSubmit({ joinAccessMode: "invite_required" })
-  const app = await createTestApp({
-    db,
-    queue: createQueueService(db.db)
-  })
-  try {
-    const response = await app.inject({
-      method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
-      payload: publicSubmitPayload()
+test("invite-required public and unlisted events reject submit without participant access", async () => {
+  for (const visibility of ["public", "unlisted"] as const) {
+    const db = fakeDbForQueueSubmit({ joinAccessMode: "invite_required", visibility })
+    const app = await createTestApp({
+      db,
+      queue: createQueueService(db.db)
     })
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+        payload: publicSubmitPayload()
+      })
 
-    assert.equal(response.statusCode, 403)
-    assert.equal(response.json().error.code, "ACCESS_REQUIRED")
-    assert.equal(db.state.requests.length, 0)
-  } finally {
-    await app.close()
+      assert.equal(response.statusCode, 403)
+      assert.equal(response.json().error.code, "ACCESS_REQUIRED")
+      assert.equal(db.state.requests.length, 0)
+    } finally {
+      await app.close()
+    }
   }
 })
 
-test("invite-required event allows public submit after invite claim", async () => {
-  const claimDb = fakeDbForPublicInviteClaim({ status: "active", joinAccessMode: "invite_required" })
-  const claimApp = await createTestApp({
-    db: claimDb,
-    events: createEventsService(claimDb.db)
-  })
-  let token = ""
-  try {
-    const claim = await claimApp.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
-    token = readParticipantCookie(claim)
-
-    assert.equal(claim.statusCode, 200)
-    assert.equal(readAccessRows(claimDb).length, 1)
-  } finally {
-    await claimApp.close()
-  }
-
-  const submitDb = fakeDbForQueueSubmit({
-    joinAccessMode: "invite_required",
-    accessRows: readAccessRows(claimDb)
-  })
-  const submitApp = await createTestApp({
-    db: submitDb,
-    queue: createQueueService(submitDb.db)
-  })
-  try {
-    const response = await submitApp.inject({
-      method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
-      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
-      payload: publicSubmitPayload()
+test("invite claim grants access and allows submit for invite-required public and unlisted events", async () => {
+  for (const visibility of ["public", "unlisted"] as const) {
+    const claimDb = fakeDbForPublicInviteClaim({
+      status: "active",
+      visibility,
+      joinAccessMode: "invite_required"
     })
+    const claimApp = await createTestApp({
+      db: claimDb,
+      events: createEventsService(claimDb.db)
+    })
+    let token = ""
+    try {
+      const claim = await claimApp.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
+      token = readParticipantCookie(claim)
 
-    assert.equal(response.statusCode, 201)
-    assert.equal(submitDb.state.requests.length, 1)
-  } finally {
-    await submitApp.close()
+      assert.equal(claim.statusCode, 200)
+      assert.equal(readAccessRows(claimDb).length, 1)
+    } finally {
+      await claimApp.close()
+    }
+
+    const submitDb = fakeDbForQueueSubmit({
+      visibility,
+      joinAccessMode: "invite_required",
+      accessRows: readAccessRows(claimDb)
+    })
+    const submitApp = await createTestApp({
+      db: submitDb,
+      queue: createQueueService(submitDb.db)
+    })
+    try {
+      const response = await submitApp.inject({
+        method: "POST",
+        url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+        headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
+        payload: publicSubmitPayload()
+      })
+
+      assert.equal(response.statusCode, 201)
+      assert.equal(submitDb.state.requests.length, 1)
+    } finally {
+      await submitApp.close()
+    }
   }
 })
 
-test("publicJoinEnabled false blocks submit even after invite access", async () => {
+test("publicJoinEnabled false blocks submit regardless of join access mode", async () => {
   const token = "participant-token-with-invite-access-123"
   const participantTokenHash = hashParticipantToken(token, testConfig().participantTokenSecret)
-  const db = fakeDbForQueueSubmit({
-    joinAccessMode: "invite_required",
-    publicJoinEnabled: false,
-    accessRows: [{ eventId: ACTIVE_EVENT_ID, participantTokenHash, grantedByInviteId: "invite-1" }]
-  })
-  const app = await createTestApp({
-    db,
-    queue: createQueueService(db.db)
-  })
-  try {
-    const response = await app.inject({
-      method: "POST",
-      url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
-      headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
-      payload: publicSubmitPayload()
+  for (const joinAccessMode of ["open", "invite_required"] as const) {
+    const db = fakeDbForQueueSubmit({
+      joinAccessMode,
+      publicJoinEnabled: false,
+      accessRows: [{ eventId: ACTIVE_EVENT_ID, participantTokenHash, grantedByInviteId: "invite-1" }]
     })
+    const app = await createTestApp({
+      db,
+      queue: createQueueService(db.db)
+    })
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`,
+        headers: { cookie: `${PARTICIPANT_COOKIE_NAME}=${token}` },
+        payload: publicSubmitPayload()
+      })
 
-    assert.equal(response.statusCode, 409)
-    assert.equal(response.json().error.code, "CONFLICT")
-    assert.equal(db.state.requests.length, 0)
-  } finally {
-    await app.close()
+      assert.equal(response.statusCode, 409)
+      assert.equal(response.json().error.code, "CONFLICT")
+      assert.equal(db.state.requests.length, 0)
+    } finally {
+      await app.close()
+    }
   }
 })
 
-test("public event detail returns active public event", async () => {
-  const db = fakeDbForPublicEventDetail({ status: "active", publicJoinEnabled: true, publicQueueEnabled: true })
+test("public event detail returns active public and unlisted events by direct URL", async () => {
+  for (const visibility of ["public", "unlisted"] as const) {
+    const db = fakeDbForPublicEventDetail({
+      status: "active",
+      visibility,
+      publicJoinEnabled: true,
+      publicQueueEnabled: true
+    })
+    const app = await createTestApp({
+      db,
+      events: createEventsService(db.db)
+    })
+    try {
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}` })
+      const body = response.json()
+
+      assert.equal(response.statusCode, 200)
+      assert.equal(body.event.publicId, ACTIVE_EVENT_PUBLIC_ID)
+      assert.equal(body.event.name, "Active Event")
+      assert.equal(body.event.status, "active")
+      assert.equal(body.event.visibility, visibility)
+      assert.equal(body.event.publicJoinEnabled, true)
+      assert.equal(body.event.publicQueueEnabled, true)
+      assert.equal(body.venue.slug, "klub-x")
+      assert.equal(body.venue.name, "Klub X")
+      assert.equal(body.operatedByOrganization.slug, "poza-nuta-demo")
+      assert.equal(body.submissions.enabled, true)
+      assert.equal(body.publicQueue.visible, true)
+      assert.equal(response.body.includes(ACTIVE_EVENT_ID), false)
+      assert.equal("id" in body.event, false)
+      assert.equal("id" in body.operatedByOrganization, false)
+    } finally {
+      await app.close()
+    }
+  }
+})
+
+test("private event detail returns controlled not found", async () => {
+  const db = fakeDbForPublicEventDetail({
+    status: "active",
+    visibility: "private",
+    publicJoinEnabled: true,
+    publicQueueEnabled: true
+  })
   const app = await createTestApp({
     db,
     events: createEventsService(db.db)
   })
   try {
     const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}` })
-    const body = response.json()
 
-    assert.equal(response.statusCode, 200)
-    assert.equal(body.event.publicId, ACTIVE_EVENT_PUBLIC_ID)
-    assert.equal(body.event.name, "Active Event")
-    assert.equal(body.event.status, "active")
-    assert.equal(body.event.publicJoinEnabled, true)
-    assert.equal(body.event.publicQueueEnabled, true)
-    assert.equal(body.venue.slug, "klub-x")
-    assert.equal(body.venue.name, "Klub X")
-    assert.equal(body.operatedByOrganization.slug, "poza-nuta-demo")
-    assert.equal(body.submissions.enabled, true)
-    assert.equal(body.publicQueue.visible, true)
-    assert.equal(response.body.includes(ACTIVE_EVENT_ID), false)
-    assert.equal("id" in body.event, false)
-    assert.equal("id" in body.operatedByOrganization, false)
+    assert.equal(response.statusCode, 404)
+    assert.equal(response.json().error.code, "NOT_FOUND")
+    assert.equal(response.json().error.message, "Missing event")
   } finally {
     await app.close()
+  }
+})
+
+test("invite-required public and unlisted event detail remains visible without access", async () => {
+  for (const visibility of ["public", "unlisted"] as const) {
+    const db = fakeDbForPublicEventDetail({
+      status: "active",
+      visibility,
+      publicJoinEnabled: true,
+      publicQueueEnabled: true,
+      joinAccessMode: "invite_required"
+    })
+    const app = await createTestApp({
+      db,
+      events: createEventsService(db.db)
+    })
+    try {
+      const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}` })
+
+      assert.equal(response.statusCode, 200)
+      assert.equal(response.json().event.visibility, visibility)
+      assert.deepEqual(response.json().submissions, {
+        enabled: false,
+        reason: "ACCESS_REQUIRED"
+      })
+    } finally {
+      await app.close()
+    }
   }
 })
 
@@ -670,6 +741,7 @@ test("public event detail does not use internal event id as public id", async ()
                 name: "Active Event",
                 slug: "active-event",
                 status: "active",
+                visibility: "public",
                 startsAt: null,
                 endsAt: null,
                 publicJoinEnabled: true,
@@ -797,6 +869,28 @@ test("public invite claim sets participant cookie and returns event redirect wit
     })
     assert.equal(response.body.includes(ACTIVE_EVENT_ID), false)
     assert.equal(response.body.includes("inviteCode1"), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("public invite claim hides invites for private events", async () => {
+  const db = fakeDbForPublicInviteClaim({
+    status: "active",
+    visibility: "private",
+    joinAccessMode: "invite_required"
+  })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db)
+  })
+  try {
+    const response = await app.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
+
+    assert.equal(response.statusCode, 404)
+    assert.equal(response.json().error.code, "NOT_FOUND")
+    assert.equal(response.json().error.message, "Invalid or expired invite")
+    assert.equal(readAccessRows(db).length, 0)
   } finally {
     await app.close()
   }
@@ -1125,6 +1219,35 @@ test("event-id public submit hides events from non-public venues and organizatio
   }
 })
 
+test("private event blocks queue submit and my-requests with controlled not found", async () => {
+  for (const request of [
+    { method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue` },
+    { method: "POST", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/requests`, payload: publicSubmitPayload() },
+    { method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/my-requests` }
+  ] as const) {
+    const db = fakeDbForQueueEventContext({
+      status: "active",
+      visibility: "private",
+      publicJoinEnabled: true,
+      publicQueueEnabled: true
+    })
+    const app = await createTestApp({
+      db,
+      queue: createQueueService(db.db),
+      events: createEventsService(db.db)
+    })
+    try {
+      const response = await app.inject(request)
+
+      assert.equal(response.statusCode, 404)
+      assert.equal(response.json().error.code, "NOT_FOUND")
+      assert.equal(response.json().error.message, "Missing event")
+    } finally {
+      await app.close()
+    }
+  }
+})
+
 test("public queue shows now and approved queue without private notes", async () => {
   const queue = createInMemoryQueueService()
   const approved = queue.addRequest(ACTIVE_EVENT_ID, "approved", { position: 1, note: "private operator note" })
@@ -1268,6 +1391,23 @@ test("public queue snapshot is visible for active paused and closed events", asy
     } finally {
       await app.close()
     }
+  }
+})
+
+test("unlisted public queue is available through its direct event URL", async () => {
+  const db = fakeDbForPublicQueueStatus("active", "unlisted")
+  const app = await createTestApp({
+    db,
+    queue: createQueueService(db.db),
+    events: createEventsService(db.db)
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue` })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().event.visibility, "unlisted")
+  } finally {
+    await app.close()
   }
 })
 
@@ -2021,7 +2161,8 @@ function createInMemoryQueueService(options: { now?: Date } = {}): TestQueueServ
         event: {
           publicId: event.publicId,
           name: event.name,
-          status: event.status
+          status: event.status,
+          visibility: "public"
         },
         venue: { id: VENUE_ID, name: "Klub X", slug: "klub-x" },
         now: toPublic(state.requests.find((request) => request.eventId === eventId && request.status === "now") ?? null),
@@ -2329,6 +2470,7 @@ function fakeEventsService(options: { lookup?: PublicActiveEventLookup | null } 
           publicId: activeEvent.publicId,
           venueId: activeEvent.venueId,
           status: activeEvent.status,
+          visibility: activeEvent.visibility,
           publicJoinEnabled: activeEvent.publicJoinEnabled,
           publicQueueEnabled: activeEvent.publicQueueEnabled,
           joinAccessMode: activeEvent.joinAccessMode
@@ -2356,6 +2498,7 @@ function findPublicEventResolution(eventPublicId: string) {
         publicId: event.publicId,
         venueId: VENUE_ID,
         status: event.status,
+        visibility: "public",
         publicJoinEnabled: true,
         publicQueueEnabled: true,
         joinAccessMode: "open"
@@ -2386,6 +2529,7 @@ function makePublicEvent(eventId: string, status: string): EventSummary {
     name: `${status} Event`,
     slug: `${status}-event`,
     status,
+    visibility: "public",
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
@@ -2445,6 +2589,7 @@ type ParticipantAccessRow = {
 
 function fakeDbForQueueSubmit(options: {
   status?: string
+  visibility?: "public" | "unlisted" | "private"
   publicJoinEnabled?: boolean
   publicQueueEnabled?: boolean
   joinAccessMode: "open" | "invite_required"
@@ -2478,6 +2623,7 @@ function fakeDbForQueueSubmit(options: {
               operatedByOrganizationId: "77777777-7777-4777-8777-777777777777",
               name: "Active Event",
               status: options.status ?? "active",
+              visibility: options.visibility ?? "public",
               publicJoinEnabled: options.publicJoinEnabled ?? true,
               publicQueueEnabled: options.publicQueueEnabled ?? true,
               joinAccessMode: options.joinAccessMode
@@ -2549,6 +2695,7 @@ function fakeDbForQueueSubmit(options: {
 
 function fakeDbForQueueEventContext(event: {
   status: string
+  visibility?: "public" | "unlisted" | "private"
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
   joinAccessMode?: "open" | "invite_required"
@@ -2567,6 +2714,7 @@ function fakeDbForQueueEventContext(event: {
             operatedByOrganizationId: "77777777-7777-4777-8777-777777777777",
             name: "Active Event",
             ...event,
+            visibility: event.visibility ?? "public",
             joinAccessMode: event.joinAccessMode ?? "open"
           },
           venue: {
@@ -2585,12 +2733,15 @@ function fakeDbForQueueEventContext(event: {
   } as unknown as DbResources["db"])
 }
 
-function fakeDbForPublicQueueStatus(status: string): DbResources {
+function fakeDbForPublicQueueStatus(
+  status: string,
+  visibility: "public" | "unlisted" | "private" = "public"
+): DbResources {
   let selectCount = 0
   return fakeDbResourcesWithClient({
     select: () => {
       selectCount += 1
-      if (selectCount === 1) {
+      if (selectCount <= 2) {
         return queryChain([
           {
             event: {
@@ -2600,6 +2751,7 @@ function fakeDbForPublicQueueStatus(status: string): DbResources {
               operatedByOrganizationId: "77777777-7777-4777-8777-777777777777",
               name: "Public Queue Event",
               status,
+              visibility,
               publicJoinEnabled: true,
               publicQueueEnabled: true,
               joinAccessMode: "open"
@@ -2626,6 +2778,7 @@ function fakeDbForPublicQueueStatus(status: string): DbResources {
 
 function fakeDbForPublicEventDetail(event: {
   status: string
+  visibility?: "public" | "unlisted" | "private"
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
   joinAccessMode?: "open" | "invite_required"
@@ -2647,6 +2800,7 @@ function fakeDbForPublicEventDetail(event: {
               name: "Active Event",
               slug: "active-event",
               status: event.status,
+              visibility: event.visibility ?? "public",
               startsAt: null,
               endsAt: null,
               publicJoinEnabled: event.publicJoinEnabled,
@@ -2707,6 +2861,7 @@ function fakeDbForInviteMutation(options: {
     name: "Active Event",
     slug: "active-event",
     status: options.status ?? "active",
+    visibility: "public",
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
@@ -2809,6 +2964,7 @@ function fakeDbForInviteMutation(options: {
 
 function fakeDbForPublicInviteClaim(event: {
   status: string
+  visibility?: "public" | "unlisted" | "private"
   inviteStatus?: string
   expiresAt?: Date | null
   venueStatus?: string
@@ -2830,6 +2986,7 @@ function fakeDbForPublicInviteClaim(event: {
             id: ACTIVE_EVENT_ID,
             publicId: ACTIVE_EVENT_PUBLIC_ID,
             status: event.status,
+            visibility: event.visibility ?? "public",
             publicJoinEnabled: true,
             publicQueueEnabled: true,
             joinAccessMode: event.joinAccessMode ?? "open"

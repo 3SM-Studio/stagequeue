@@ -19,10 +19,12 @@ type Snapshot = {
 
 const migrationSource = readFileSync("packages/db/drizzle/0010_even_prodigy.sql", "utf8")
 const c18cMigrationSource = readFileSync("packages/db/drizzle/0011_aberrant_tyger_tiger.sql", "utf8")
+const c20bMigrationSource = readFileSync("packages/db/drizzle/0012_nifty_shiva.sql", "utf8")
 const schemaSource = readFileSync("packages/db/src/schema.ts", "utf8")
 const ciSmokeSource = readFileSync("apps/api/scripts/ci-db-migration-smoke.ts", "utf8")
 const snapshot = JSON.parse(readFileSync("packages/db/drizzle/meta/0010_snapshot.json", "utf8")) as Snapshot
 const c18cSnapshot = JSON.parse(readFileSync("packages/db/drizzle/meta/0011_snapshot.json", "utf8")) as Snapshot
+const c20bSnapshot = JSON.parse(readFileSync("packages/db/drizzle/meta/0012_snapshot.json", "utf8")) as Snapshot
 
 const c18bCheckConstraints = [
   {
@@ -184,6 +186,13 @@ const c18cCheckConstraints = [
   }
 ] as const
 
+const eventVisibilityConstraint = {
+  table: "events",
+  column: "visibility",
+  name: "events_visibility_check",
+  allowed: ["public", "unlisted", "private"]
+} as const
+
 test("C18b core state CHECK constraints exist in schema and Drizzle snapshot", () => {
   for (const constraint of c18bCheckConstraints) {
     const snapshotCheck = snapshot.tables[`public.${constraint.table}`]?.checkConstraints?.[constraint.name]
@@ -298,6 +307,32 @@ test("C18c migration leaves explicitly excluded dynamic candidates out of scope"
   assert.doesNotMatch(c18cMigrationSource, /provider.*check/i)
 })
 
+test("C20b event visibility uses a text CHECK constraint with a public default", () => {
+  const snapshotCheck =
+    c20bSnapshot.tables["public.events"]?.checkConstraints?.[eventVisibilityConstraint.name]
+
+  assert.doesNotMatch(schemaSource, /pgEnum/)
+  assert.match(schemaSource, /visibility: text\("visibility", \{ enum: eventVisibilities \}\)\.notNull\(\)\.default\("public"\)/)
+  assert.match(schemaSource, /"events_visibility_check"/)
+  assert.ok(snapshotCheck, "events_visibility_check should be present in the Drizzle snapshot")
+  assert.equal(snapshotCheck.name, eventVisibilityConstraint.name)
+  assert.equal(snapshotCheck.value, checkExpression(eventVisibilityConstraint))
+  assert.match(
+    c20bMigrationSource,
+    /ADD COLUMN "visibility" text DEFAULT 'public' NOT NULL/
+  )
+  assert.match(
+    c20bMigrationSource,
+    new RegExp(
+      `ADD CONSTRAINT "${eventVisibilityConstraint.name}" CHECK \\(${escapeRegExp(
+        checkExpression(eventVisibilityConstraint)
+      )}\\)`
+    )
+  )
+  assert.equal((eventVisibilityConstraint.allowed as readonly string[]).includes("hidden"), false)
+  assert.doesNotMatch(checkExpression(eventVisibilityConstraint), /'hidden'/)
+})
+
 test("CI DB smoke verifies CHECK constraints through pg_constraint", () => {
   assert.match(ciSmokeSource, /pg_constraint/)
   assert.match(ciSmokeSource, /convalidated = true/)
@@ -305,6 +340,7 @@ test("CI DB smoke verifies CHECK constraints through pg_constraint", () => {
   for (const constraint of [...c18bCheckConstraints, ...c18cCheckConstraints]) {
     assert.match(ciSmokeSource, new RegExp(`"${constraint.name}"`))
   }
+  assert.match(ciSmokeSource, new RegExp(`"${eventVisibilityConstraint.name}"`))
 })
 
 function checkExpression(constraint: {
@@ -315,4 +351,8 @@ function checkExpression(constraint: {
   return `"${constraint.table}"."${constraint.column}" in (${constraint.allowed
     .map((value) => `'${value}'`)
     .join(", ")})`
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }

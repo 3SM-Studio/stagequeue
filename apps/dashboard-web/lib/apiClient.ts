@@ -70,6 +70,7 @@ export type QueueActionResponse = {
 }
 
 export type DashboardEventStatus = "draft" | "scheduled" | "active" | "paused" | "closed" | "archived" | "cancelled"
+export type DashboardEventVisibility = "public" | "unlisted" | "private"
 
 export type DashboardEventSummary = {
   id: string
@@ -77,6 +78,7 @@ export type DashboardEventSummary = {
   name: string
   slug: string
   status: DashboardEventStatus
+  visibility: DashboardEventVisibility
   startsAt: string | null
   endsAt: string | null
   publicJoinEnabled: boolean
@@ -110,6 +112,7 @@ export type DashboardEventDetail = {
   name: string
   slug: string
   status: DashboardEventStatus
+  visibility: DashboardEventVisibility
   startsAt: string | null
   endsAt: string | null
   publicJoinEnabled: boolean
@@ -137,6 +140,7 @@ export type CreateDashboardEventInput = {
   name: string
   slug: string
   status?: Extract<DashboardEventStatus, "draft" | "scheduled" | "active">
+  visibility?: DashboardEventVisibility
   startsAt?: string
   endsAt?: string
   publicJoinEnabled?: boolean
@@ -786,6 +790,7 @@ function isDashboardEventDetail(value: unknown): value is DashboardEventDetail {
     typeof value.name === "string" &&
     typeof value.slug === "string" &&
     isDashboardEventStatus(value.status) &&
+    isDashboardEventVisibility(value.visibility) &&
     (typeof value.startsAt === "string" || value.startsAt === null) &&
     (typeof value.endsAt === "string" || value.endsAt === null) &&
     typeof value.publicJoinEnabled === "boolean" &&
@@ -841,6 +846,7 @@ function isDashboardEventSummary(value: unknown): value is DashboardEventSummary
     typeof value.name === "string" &&
     typeof value.slug === "string" &&
     isDashboardEventStatus(value.status) &&
+    isDashboardEventVisibility(value.visibility) &&
     (typeof value.startsAt === "string" || value.startsAt === null) &&
     (typeof value.endsAt === "string" || value.endsAt === null) &&
     typeof value.publicJoinEnabled === "boolean" &&
@@ -878,6 +884,10 @@ function isDashboardEventStatus(value: unknown): value is DashboardEventStatus {
     value === "archived" ||
     value === "cancelled"
   )
+}
+
+function isDashboardEventVisibility(value: unknown): value is DashboardEventVisibility {
+  return value === "public" || value === "unlisted" || value === "private"
 }
 
 function isDashboardAccessReason(value: unknown): value is DashboardAccessReason {

@@ -36,6 +36,7 @@ const expectedCheckConstraintNames = [
   "venue_organization_access_role_check",
   "venue_organization_access_status_check",
   "events_status_check",
+  "events_visibility_check",
   "event_invites_status_check",
   "event_staff_assignments_role_check",
   "event_staff_assignments_status_check",
@@ -84,6 +85,7 @@ try {
   })
   createdIds.eventId = event.id
   assert.equal(event.status, "active")
+  assert.equal(event.visibility, "public")
   assert.equal(event.publicJoinEnabled, true)
   assert.equal(event.publicQueueEnabled, true)
   assert.equal(event.joinAccessMode, "open")

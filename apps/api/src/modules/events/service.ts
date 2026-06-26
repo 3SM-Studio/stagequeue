@@ -12,7 +12,8 @@ import {
   venues,
   type DbClient,
   type EventJoinAccessMode,
-  type EventStatus
+  type EventStatus,
+  type EventVisibility
 } from "@poza-nuta/db"
 import { randomBytes } from "node:crypto"
 import { and, eq, inArray, ne, sql } from "drizzle-orm"
@@ -20,9 +21,11 @@ import { ApiHttpError } from "../../errors.ts"
 import type { DomainEventBus, DomainEventType } from "../../plugins/eventBus.ts"
 import {
   assertPublicEventContainerVisible,
+  assertPublicEventDirectlyVisible,
   assertPublicEventDetailVisible,
   getPublicQueueState,
   getPublicSubmissionsState,
+  isPublicEventDiscoverable,
   isPublicOrganizationVisible,
   isPublicVenueVisible
 } from "../publicVisibility.ts"
@@ -36,6 +39,7 @@ export type EventSummary = {
   name: string
   slug: string
   status: string
+  visibility: EventVisibility
   startsAt: Date | null
   endsAt: Date | null
   publicJoinEnabled: boolean
@@ -86,6 +90,7 @@ export type PublicEventDetail = {
     name: string
     slug: string
     status: string
+    visibility: EventVisibility
     startsAt: Date | null
     endsAt: Date | null
     publicJoinEnabled: boolean
@@ -117,6 +122,7 @@ export type PublicEventResolution = {
   publicId: string
   venueId: string
   status: string
+  visibility: EventVisibility
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
   joinAccessMode: EventJoinAccessMode
@@ -143,6 +149,7 @@ export type CreateEventInput = {
   name: string
   slug: string
   status: Extract<EventStatus, "draft" | "scheduled" | "active">
+  visibility?: EventVisibility
   startsAt?: string
   endsAt?: string
   publicJoinEnabled?: boolean
@@ -158,6 +165,7 @@ export type PatchEventInput = {
   publicJoinEnabled?: boolean
   publicQueueEnabled?: boolean
   joinAccessMode?: EventJoinAccessMode
+  visibility?: EventVisibility
 }
 
 export type AssignEventStaffInput = {
@@ -301,6 +309,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           name: input.name,
           slug: input.slug,
           status: input.status,
+          visibility: input.visibility ?? "public",
           startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
           endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
           publicJoinEnabled: input.publicJoinEnabled ?? false,
@@ -351,6 +360,9 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
       }
       if (input.joinAccessMode !== undefined) {
         update.joinAccessMode = input.joinAccessMode
+      }
+      if (input.visibility !== undefined) {
+        update.visibility = input.visibility
       }
 
       if (Object.keys(update).length === 0) {
@@ -547,7 +559,13 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         })
         .from(events)
         .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
-        .where(and(eq(events.venueId, venue.id), inArray(events.status, ["active", "paused"])))
+        .where(
+          and(
+            eq(events.venueId, venue.id),
+            eq(events.visibility, "public"),
+            inArray(events.status, ["active", "paused"])
+          )
+        )
         .limit(1)
       const active = activeRows[0]
       if (active && !isPublicOrganizationVisible(active.organization)) {
@@ -562,7 +580,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           city: venue.city,
           timezone: venue.timezone
         },
-        activeEvent: active?.event ?? null
+        activeEvent: active && isPublicEventDiscoverable(active.event) ? active.event : null
       }
     },
 
@@ -583,12 +601,14 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         venue: row.venue,
         organization: row.organization
       })
+      assertPublicEventDirectlyVisible(row.event)
 
       return {
         id: row.event.id,
         publicId: row.event.publicId,
         venueId: row.event.venueId,
         status: row.event.status,
+        visibility: row.event.visibility,
         publicJoinEnabled: row.event.publicJoinEnabled,
         publicQueueEnabled: row.event.publicQueueEnabled,
         joinAccessMode: row.event.joinAccessMode
@@ -624,6 +644,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           name: row.event.name,
           slug: row.event.slug,
           status: row.event.status,
+          visibility: row.event.visibility,
           startsAt: row.event.startsAt,
           endsAt: row.event.endsAt,
           publicJoinEnabled: row.event.publicJoinEnabled,
@@ -887,6 +908,7 @@ const eventSelection = {
   name: events.name,
   slug: events.slug,
   status: events.status,
+  visibility: events.visibility,
   startsAt: events.startsAt,
   endsAt: events.endsAt,
   publicJoinEnabled: events.publicJoinEnabled,
@@ -910,6 +932,7 @@ const publicEventDetailSelection = {
     name: events.name,
     slug: events.slug,
     status: events.status,
+    visibility: events.visibility,
     startsAt: events.startsAt,
     endsAt: events.endsAt,
     publicJoinEnabled: events.publicJoinEnabled,
@@ -937,6 +960,7 @@ const publicEventResolutionSelection = {
     publicId: events.publicId,
     venueId: events.venueId,
     status: events.status,
+    visibility: events.visibility,
     publicJoinEnabled: events.publicJoinEnabled,
     publicQueueEnabled: events.publicQueueEnabled,
     joinAccessMode: events.joinAccessMode
@@ -960,6 +984,7 @@ const publicInviteClaimSelection = {
     id: events.id,
     publicId: events.publicId,
     status: events.status,
+    visibility: events.visibility,
     publicJoinEnabled: events.publicJoinEnabled,
     publicQueueEnabled: events.publicQueueEnabled,
     joinAccessMode: events.joinAccessMode
@@ -1010,6 +1035,7 @@ function mapDashboardEventRow(row: DashboardEventRow): DashboardEventSummary {
     name: row.name,
     slug: row.slug,
     status: row.status,
+    visibility: row.visibility,
     startsAt: row.startsAt,
     endsAt: row.endsAt,
     publicJoinEnabled: row.publicJoinEnabled,

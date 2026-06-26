@@ -52,6 +52,72 @@ test("organization with venue access can create an event", async () => {
   }
 })
 
+test("create and patch event accept visibility while create defaults to public", async () => {
+  const events = createInMemoryEventsService()
+  const app = await createTestApp({
+    events,
+    permissions: fakePermissions({
+      venue: new Set(["venue.create_event"]),
+      event: new Set(["event.manage"])
+    })
+  })
+  try {
+    const defaultVisibility = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: eventPayload("default-visibility")
+    })
+    const unlisted = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: { ...eventPayload("unlisted-event"), visibility: "unlisted" }
+    })
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/dashboard/events/${unlisted.json().event.id}`,
+      payload: { visibility: "private" }
+    })
+
+    assert.equal(defaultVisibility.statusCode, 201)
+    assert.equal(defaultVisibility.json().event.visibility, "public")
+    assert.equal(unlisted.statusCode, 201)
+    assert.equal(unlisted.json().event.visibility, "unlisted")
+    assert.equal(patched.statusCode, 200)
+    assert.equal(patched.json().event.visibility, "private")
+  } finally {
+    await app.close()
+  }
+})
+
+test("create and patch event reject unsupported visibility", async () => {
+  const events = createInMemoryEventsService()
+  const seeded = events.addSeedEvent("visibility-validation", "draft")
+  const app = await createTestApp({
+    events,
+    permissions: fakePermissions({
+      venue: new Set(["venue.create_event"]),
+      event: new Set(["event.manage"])
+    })
+  })
+  try {
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/dashboard/events",
+      payload: { ...eventPayload("invalid-visibility"), visibility: "hidden" }
+    })
+    const patchResponse = await app.inject({
+      method: "PATCH",
+      url: `/dashboard/events/${seeded.id}`,
+      payload: { visibility: "hidden" }
+    })
+
+    assert.equal(createResponse.statusCode, 400)
+    assert.equal(patchResponse.statusCode, 400)
+  } finally {
+    await app.close()
+  }
+})
+
 test("platform owner can create an event without operatedByOrganizationId", async () => {
   const events = createInMemoryEventsService()
   const app = await createTestApp({ events, permissions: fakePermissions({ platform: new Set(["platform.manage_venues"]) }) })
@@ -674,6 +740,18 @@ test("public active-event hides active events operated by non-public organizatio
   }
 })
 
+test("public active-event discovery excludes unlisted and private events", async () => {
+  for (const visibility of ["unlisted", "private"] as const) {
+    const db = fakeDbForPublicActiveEventLookup({ visibility })
+    const events = createEventsService(db.db)
+
+    const lookup = await events.getPublicActiveEventByVenueSlug("klub-x")
+
+    assert.ok(lookup)
+    assert.equal(lookup.activeEvent, null)
+  }
+})
+
 async function createTestApp(options: {
   user?: AuthenticatedDomainUser
   permissions?: PermissionService
@@ -748,6 +826,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
         startsAt: toDateOrNull(input.startsAt),
         endsAt: toDateOrNull(input.endsAt),
         operatedByOrganizationId: input.operatedByOrganizationId ?? ORG_ID,
+        visibility: input.visibility ?? "public",
         publicJoinEnabled: input.publicJoinEnabled ?? false,
         publicQueueEnabled: input.publicQueueEnabled ?? false,
         venueId: input.venueId
@@ -823,17 +902,21 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
       }
       return {
         venue: { id: VENUE_ID, slug: "klub-x", name: "Klub X", city: "Warszawa", timezone: "Europe/Warsaw" },
-        activeEvent: [...state.events.values()].find((event) => event.status === "active" || event.status === "paused") ?? null
+        activeEvent:
+          [...state.events.values()].find(
+            (event) => event.visibility === "public" && (event.status === "active" || event.status === "paused")
+          ) ?? null
       }
     },
     async resolvePublicEventByPublicId(eventPublicId) {
       const event = [...state.events.values()].find((candidate) => candidate.publicId === eventPublicId)
-      return event
+      return event && event.visibility !== "private"
         ? {
             id: event.id,
             publicId: event.publicId,
             venueId: event.venueId,
             status: event.status,
+            visibility: event.visibility,
             publicJoinEnabled: event.publicJoinEnabled,
             publicQueueEnabled: event.publicQueueEnabled,
             joinAccessMode: event.joinAccessMode
@@ -842,7 +925,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
     },
     async getPublicEventById(eventPublicId): Promise<PublicEventDetail | null> {
       const event = [...state.events.values()].find((candidate) => candidate.publicId === eventPublicId)
-      if (!event || !["scheduled", "active", "paused", "closed"].includes(event.status)) {
+      if (!event || event.visibility === "private" || !["scheduled", "active", "paused", "closed"].includes(event.status)) {
         return null
       }
 
@@ -852,6 +935,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
           name: event.name,
           slug: event.slug,
           status: event.status,
+          visibility: event.visibility,
           startsAt: event.startsAt,
           endsAt: event.endsAt,
           publicJoinEnabled: event.publicJoinEnabled,
@@ -869,7 +953,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
     },
     async claimPublicInvite(inviteCode) {
       const event = [...state.events.values()].find((candidate) => state.invites.get(candidate.id) === inviteCode)
-      if (!event || !["scheduled", "active", "paused", "closed"].includes(event.status)) {
+      if (!event || event.visibility === "private" || !["scheduled", "active", "paused", "closed"].includes(event.status)) {
         throw new ApiHttpError(404, "NOT_FOUND", "Invalid or expired invite")
       }
       return {
@@ -908,6 +992,7 @@ function makeEvent(id: string, slug: string, status: string): EventSummary {
     name: `Event ${slug}`,
     slug,
     status,
+    visibility: "public",
     startsAt: null,
     endsAt: null,
     publicJoinEnabled: true,
@@ -1207,7 +1292,10 @@ function fakeDbForPatchEvent(initial: EventSummary): DbResources & { updated: bo
   return resources
 }
 
-function fakeDbForPublicActiveEventLookup(options: { organizationStatus: string }): DbResources {
+function fakeDbForPublicActiveEventLookup(options: {
+  organizationStatus?: string
+  visibility?: "public" | "unlisted" | "private"
+}): DbResources {
   let selectCount = 0
   return {
     db: {
@@ -1229,9 +1317,12 @@ function fakeDbForPublicActiveEventLookup(options: { organizationStatus: string 
         if (selectCount === 2) {
           return queryChain([
             {
-              event: makeEvent(EVENT_ID, "friday", "active"),
+              event: {
+                ...makeEvent(EVENT_ID, "friday", "active"),
+                visibility: options.visibility ?? "public"
+              },
               organization: {
-                status: options.organizationStatus
+                status: options.organizationStatus ?? "active"
               }
             }
           ])

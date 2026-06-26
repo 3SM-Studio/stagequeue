@@ -26,6 +26,7 @@ export type PublicEvent = {
   name: string
   slug: string
   status: "active" | "paused" | "draft" | "scheduled" | "closed" | "archived" | "cancelled" | string
+  visibility: "public" | "unlisted" | "private"
   startsAt: string | null
   endsAt: string | null
   publicJoinEnabled: boolean
@@ -50,6 +51,7 @@ export type PublicEventDetail = {
     name: string
     slug: string
     status: PublicEvent["status"]
+    visibility: PublicEvent["visibility"]
     startsAt: string | null
     endsAt: string | null
     publicJoinEnabled: boolean

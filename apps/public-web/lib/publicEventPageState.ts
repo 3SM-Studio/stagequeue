@@ -45,7 +45,7 @@ function submissionsClosedLabel(reason: string | undefined): string {
     return "Zgloszenia publiczne sa wylaczone"
   }
   if (reason === "ACCESS_REQUIRED") {
-    return "Zgloszenia wymagaja linku z zaproszeniem"
+    return "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu."
   }
 
   return "Zgloszenia sa zamkniete"

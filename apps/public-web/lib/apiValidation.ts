@@ -151,6 +151,7 @@ function isPublicEvent(value: unknown): value is PublicEvent {
     isString(value.name) &&
     isString(value.slug) &&
     isEventStatus(value.status) &&
+    isEventVisibility(value.visibility) &&
     isNullableString(value.startsAt) &&
     isNullableString(value.endsAt) &&
     typeof value.publicJoinEnabled === "boolean" &&
@@ -166,6 +167,7 @@ function isPublicEventDetailEvent(value: unknown): value is PublicEventDetail["e
     isString(value.name) &&
     isString(value.slug) &&
     isEventStatus(value.status) &&
+    isEventVisibility(value.visibility) &&
     isNullableString(value.startsAt) &&
     isNullableString(value.endsAt) &&
     typeof value.publicJoinEnabled === "boolean" &&
@@ -254,6 +256,10 @@ function isRequestStatus(value: unknown): value is PublicMyRequest["status"] {
 
 function isJoinAccessMode(value: unknown): value is PublicEvent["joinAccessMode"] {
   return isString(value) && ["open", "invite_required"].includes(value)
+}
+
+function isEventVisibility(value: unknown): value is PublicEvent["visibility"] {
+  return isString(value) && ["public", "unlisted", "private"].includes(value)
 }
 
 function isNullableString(value: unknown): value is string | null {
