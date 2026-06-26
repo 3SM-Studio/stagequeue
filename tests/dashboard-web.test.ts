@@ -630,6 +630,25 @@ test("dashboard-web createDashboardEvent timeout maps to readable error", async 
   )
 })
 
+test("dashboard-web maps active venue event conflict to actionable Polish copy", () => {
+  const message = mapCreateEventError(
+    new DashboardApiError(409, "VENUE_HAS_ACTIVE_EVENT", "Venue already has an active or paused event")
+  )
+
+  assert.equal(
+    message,
+    "Ten lokal ma już aktywne wydarzenie. Zamknij je albo utwórz nowe jako szkic/zaplanowane."
+  )
+  assert.equal(message.includes("Sprawdź, czy API działa"), false)
+})
+
+test("dashboard-web does not map other business 4xx errors to API unavailable copy", () => {
+  const message = mapCreateEventError(new DashboardApiError(422, "EVENT_VALIDATION", "Nieprawidlowe dane wydarzenia."))
+
+  assert.equal(message, "Nieprawidlowe dane wydarzenia.")
+  assert.equal(message.includes("Sprawdz, czy API dziala"), false)
+})
+
 test("dashboard-web validates created event response shape", () => {
   assert.equal(assertDashboardCreatedEventResponse({ event: dashboardEvent("draft") }).event.venue.slug, "demo-klub")
   assert.throws(() => assertDashboardCreatedEventResponse({ event: dashboardEventDetail("draft") }), /Invalid dashboard API response/)
