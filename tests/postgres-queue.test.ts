@@ -1440,6 +1440,30 @@ test("unlisted public queue is available through its direct event URL", async ()
   }
 })
 
+test("public queue read does not require invite access or public submissions", async () => {
+  for (const publicJoinEnabled of [true, false]) {
+    const db = fakeDbForPublicQueueStatus("active", "public", {
+      publicJoinEnabled,
+      joinAccessMode: "invite_required"
+    })
+    const app = await createTestApp({
+      db,
+      queue: createQueueService(db.db)
+    })
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: `/public/events/${ACTIVE_EVENT_PUBLIC_ID}/queue`
+      })
+
+      assert.equal(response.statusCode, 200)
+      assert.equal(response.json().submissions.enabled, publicJoinEnabled)
+    } finally {
+      await app.close()
+    }
+  }
+})
+
 test("public queue snapshot is hidden for archived and cancelled events", async () => {
   for (const status of ["archived", "cancelled"]) {
     const db = fakeDbForQueueEventContext({
@@ -2764,7 +2788,11 @@ function fakeDbForQueueEventContext(event: {
 
 function fakeDbForPublicQueueStatus(
   status: string,
-  visibility: "public" | "unlisted" | "private" = "public"
+  visibility: "public" | "unlisted" | "private" = "public",
+  options: {
+    publicJoinEnabled?: boolean
+    joinAccessMode?: "open" | "invite_required"
+  } = {}
 ): DbResources {
   let selectCount = 0
   return fakeDbResourcesWithClient({
@@ -2781,9 +2809,9 @@ function fakeDbForPublicQueueStatus(
               name: "Public Queue Event",
               status,
               visibility,
-              publicJoinEnabled: true,
+              publicJoinEnabled: options.publicJoinEnabled ?? true,
               publicQueueEnabled: true,
-              joinAccessMode: "open"
+              joinAccessMode: options.joinAccessMode ?? "open"
             },
             venue: {
               id: VENUE_ID,

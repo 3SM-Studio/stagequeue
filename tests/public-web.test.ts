@@ -40,6 +40,7 @@ import {
 import {
   getPublicDiscoveryPageData,
   getPublicEventPageData,
+  getPublicEventQueuePageData,
   getVenueMetadataData,
   getVenuePageData
 } from "../apps/public-web/lib/pageData.ts"
@@ -279,6 +280,128 @@ test("public-web event page loader maps private event not found response to its 
   }
 })
 
+test("public event queue page loader reads public and unlisted queues by event public id", async () => {
+  for (const visibility of ["public", "unlisted"] as const) {
+    const previousFetch = globalThis.fetch
+    const requestedUrls: string[] = []
+    globalThis.fetch = async (input) => {
+      const url = String(input)
+      requestedUrls.push(url)
+      if (url.endsWith("/public/events/ka2Md-d1das")) {
+        const detail = validPublicEventDetailResponse()
+        return jsonResponse({
+          ...detail,
+          event: { ...detail.event, visibility }
+        })
+      }
+      if (url.endsWith("/public/events/ka2Md-d1das/queue")) {
+        return jsonResponse(validPublicQueueResponse())
+      }
+      return jsonResponse({ error: { code: "NOT_FOUND", message: "Missing" } }, 404)
+    }
+
+    try {
+      const data = await getPublicEventQueuePageData("ka2Md-d1das")
+
+      assert.equal(data.kind, "ready")
+      assert.deepEqual(
+        requestedUrls.map((url) => new URL(url).pathname),
+        ["/public/events/ka2Md-d1das", "/public/events/ka2Md-d1das/queue"]
+      )
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  }
+})
+
+test("public event queue page loader returns controlled disabled and scheduled states without fetching queue", async () => {
+  for (const scenario of [
+    {
+      status: "active",
+      publicQueue: { visible: false, reason: "PUBLIC_QUEUE_DISABLED" },
+      expectedReason: "disabled"
+    },
+    {
+      status: "scheduled",
+      publicQueue: { visible: false, reason: "QUEUE_NOT_VISIBLE" },
+      expectedReason: "scheduled"
+    }
+  ] as const) {
+    const previousFetch = globalThis.fetch
+    let fetchCount = 0
+    globalThis.fetch = async () => {
+      fetchCount += 1
+      const detail = validPublicEventDetailResponse()
+      return jsonResponse({
+        ...detail,
+        event: { ...detail.event, status: scenario.status },
+        publicQueue: scenario.publicQueue
+      })
+    }
+
+    try {
+      const data = await getPublicEventQueuePageData("ka2Md-d1das")
+
+      assert.equal(data.kind, "unavailable")
+      if (data.kind === "unavailable") {
+        assert.equal(data.reason, scenario.expectedReason)
+      }
+      assert.equal(fetchCount, 1)
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  }
+})
+
+test("public event queue page loader keeps hidden events on the controlled 404 path", async () => {
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    jsonResponse({ error: { code: "NOT_FOUND", message: "Missing event" } }, 404)
+
+  try {
+    for (const eventPublicId of ["privateEvent1", "draftEvent1", "archivedEvent1", "cancelledEvent1"]) {
+      assert.deepEqual(await getPublicEventQueuePageData(eventPublicId), { kind: "not-found" })
+    }
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
+test("public event queue page loader maps queue policy races to controlled unavailable states", async () => {
+  for (const scenario of [
+    { status: "active", responseStatus: 403, expectedReason: "disabled" },
+    { status: "scheduled", responseStatus: 409, expectedReason: "scheduled" }
+  ] as const) {
+    const previousFetch = globalThis.fetch
+    let fetchCount = 0
+    globalThis.fetch = async () => {
+      fetchCount += 1
+      if (fetchCount === 1) {
+        const detail = validPublicEventDetailResponse()
+        return jsonResponse({
+          ...detail,
+          event: { ...detail.event, status: scenario.status }
+        })
+      }
+      return jsonResponse(
+        { error: { code: "QUEUE_UNAVAILABLE", message: "Queue unavailable" } },
+        scenario.responseStatus
+      )
+    }
+
+    try {
+      const data = await getPublicEventQueuePageData("ka2Md-d1das")
+
+      assert.equal(data.kind, "unavailable")
+      if (data.kind === "unavailable") {
+        assert.equal(data.reason, scenario.expectedReason)
+      }
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  }
+})
+
 test("public-web discovery page data maps API failure to controlled error state", async () => {
   const previousFetch = globalThis.fetch
   globalThis.fetch = async () =>
@@ -355,10 +478,25 @@ test("legacy venue page links its active event only through eventPublicId", () =
 
 test("canonical event and invite routes remain event-scoped", () => {
   const eventPageSource = readFileSync("apps/public-web/app/event/[eventPublicId]/page.tsx", "utf8")
+  const eventQueuePageSource = readFileSync(
+    "apps/public-web/app/event/[eventPublicId]/queue/page.tsx",
+    "utf8"
+  )
+  const eventViewSource = readFileSync("apps/public-web/components/PublicEventParticipantView.tsx", "utf8")
   const inviteRouteSource = readFileSync("apps/public-web/app/invite/[inviteCode]/route.ts", "utf8")
 
   assert.match(eventPageSource, /getPublicEventPageData\(eventPublicId/)
   assert.match(eventPageSource, /<PublicEventParticipantView eventPublicId=\{eventPublicId\}/)
+  assert.match(eventQueuePageSource, /getPublicEventQueuePageData\(eventPublicId/)
+  assert.match(eventQueuePageSource, /<PublicQueueView eventPublicId=\{eventPublicId\}/)
+  assert.match(eventQueuePageSource, /Kolejka wydarzenia/)
+  assert.match(eventQueuePageSource, /Wróć do wydarzenia/)
+  assert.match(eventQueuePageSource, /Kolejka tego wydarzenia nie jest publiczna\./)
+  assert.match(eventQueuePageSource, /Kolejka będzie dostępna po rozpoczęciu wydarzenia\./)
+  assert.doesNotMatch(eventQueuePageSource, /venueSlug|JoinForm|claimPublicInvite|EventInvitePanel/)
+  assert.match(eventViewSource, /state\.showQueueLink/)
+  assert.match(eventViewSource, /href=\{`\/event\/\$\{eventPublicId\}\/queue`\}/)
+  assert.match(eventViewSource, />\s*Kolejka wydarzenia\s*</)
   assert.match(inviteRouteSource, /claimPublicInviteServer\(inviteCode/)
   assert.match(inviteRouteSource, /NextResponse\.redirect\(new URL\(claim\.body\.redirectTo, request\.url\)\)/)
 })
@@ -710,6 +848,23 @@ test("public-web event-first page maps detail response to view state", () => {
   assert.equal(state.submissionsLabel, "Zgloszenia sa otwarte")
   assert.equal(state.queueLabel, "Kolejka publiczna jest widoczna")
   assert.equal(state.showQueueLink, true)
+})
+
+test("public-web event page hides queue CTA when the queue is not public", () => {
+  const detail = validPublicEventDetailResponse()
+  const state = getPublicEventPageState({
+    ...detail,
+    event: {
+      ...detail.event,
+      publicQueueEnabled: false
+    },
+    publicQueue: {
+      visible: false,
+      reason: "PUBLIC_QUEUE_DISABLED"
+    }
+  })
+
+  assert.equal(state.showQueueLink, false)
 })
 
 test("public-web invite-required event without access maps to access required state", () => {

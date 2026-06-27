@@ -494,7 +494,8 @@ NEXT_PUBLIC_API_URL=http://localhost:4321
 Public-web uzywa event-first participant flow:
 
 - `/` - public discovery,
-- `/event/[eventPublicId]` - canonical event detail, submit i public queue wedlug event access policy,
+- `/event/[eventPublicId]` - canonical event detail i submit wedlug event access policy,
+- `/event/[eventPublicId]/queue` - canonical read-only public queue dla wydarzenia,
 - `/invite/[inviteCode]` - claim invite i redirect do canonical event page,
 - `/[venueSlug]` - tymczasowy read-only profil lokalu; aktywny event linkuje do `/event/[eventPublicId]`.
 
@@ -506,9 +507,10 @@ Usuniete venue-scoped participant routes zwracaja 404 i nie redirectuja przez ac
 - `/[venueSlug]/events/[eventSlug]/join`,
 - `/[venueSlug]/events/[eventSlug]/queue`.
 
-`/event/[eventPublicId]/queue` jest docelowym osobnym URL-em kolejki, ale nie istnieje jeszcze. Obecnie kolejka
-jest renderowana na `/event/[eventPublicId]`. Public profile routing `/@handle` albo `/venue/[venuePublicId]`
-pozostaje osobnym zadaniem.
+`/event/[eventPublicId]/queue` uzywa istniejacego event-scoped API i nie przywraca venue lookup. Publiczne
+i unlisted eventy sa dostepne przez direct URL, gdy `publicQueueEnabled=true`; `invite_required` oraz
+`publicJoinEnabled=false` nie blokuja samego odczytu publicznej kolejki. Public profile routing `/@handle`
+albo `/venue/[venuePublicId]` pozostaje osobnym zadaniem.
 
 Preferowane endpointy publiczne dla uczestnika:
 
@@ -525,9 +527,9 @@ venue-scoped join ani queue.
 
 Public submit uzywa anonimowego cookie `pn_participant`. Uczestnik nie zaklada konta, token nie trafia do response body, a baza zapisuje tylko hash w `song_requests.participant_token_hash`. `PARTICIPANT_TOKEN_SECRET` sluzy do HMAC-SHA-256; jesli nie jest ustawiony, API uzywa `AUTH_SECRET` jako fallback. Dodatkowe limity antyspamowe: maksymalnie `PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT` aktywne requesty (`pending`, `approved`, `now`) per event oraz cooldown `PUBLIC_REQUEST_COOLDOWN_SECONDS` sekund per participant/event. Dotychczasowy IP+event rate limit zostaje jako fallback.
 
-`/event/[eventPublicId]` pobiera event detail, queue i requesty uczestnika przez event-scoped API. Backend pozostaje
-source of truth dla visibility, lifecycle, `publicJoinEnabled`, `publicQueueEnabled`, `joinAccessMode` i
-`participant_event_access`.
+`/event/[eventPublicId]` pobiera event detail, queue i requesty uczestnika przez event-scoped API oraz linkuje
+do canonical read-only queue page, gdy kolejka jest publiczna. Backend pozostaje source of truth dla visibility,
+lifecycle, `publicJoinEnabled`, `publicQueueEnabled`, `joinAccessMode` i `participant_event_access`.
 
 ## Dashboard-web MVP foundation
 

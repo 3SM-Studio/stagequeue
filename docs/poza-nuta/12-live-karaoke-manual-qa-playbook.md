@@ -42,7 +42,7 @@ select id, public_id, slug, status from events where slug = 'demo-karaoke';
 ```
 
 Legacy URL-e `/demo-klub/join`, `/demo-klub/queue` oraz `/:venueSlug/events/:eventSlug*` maja zwracac 404.
-Public queue jest obecnie sekcja canonical event page; osobny `/event/:eventPublicId/queue` pozostaje przyszla trasa.
+Canonical read-only public queue jest dostepna pod `/event/:eventPublicId/queue`.
 
 ## 2. Accounts and Sessions
 
@@ -139,12 +139,17 @@ Praktyczna kontrola w devtools:
 
 ## 7. Public Queue Visibility
 
+- [ ] Otworz `/event/<eventPublicId>/queue` z linku `Kolejka wydarzenia` na canonical event page.
+- [ ] Link `Wroc do wydarzenia` prowadzi do `/event/<eventPublicId>`.
 - [ ] Pending requests nie sa widoczne publicznie.
 - [ ] Public queue pokazuje aktualny `now` oraz approved queue zgodnie z polityka produktu.
 - [ ] Prywatne notatki operatora nigdy nie sa widoczne publicznie.
-- [ ] `publicQueueEnabled=false` blokuje public queue kontrolowanym bledem albo stanem disabled.
+- [ ] `publicQueueEnabled=false` pokazuje kontrolowany stan `Kolejka tego wydarzenia nie jest publiczna.`.
+- [ ] `scheduled` pokazuje kontrolowany stan `Kolejka bedzie dostepna po rozpoczeciu wydarzenia.`.
 - [ ] `paused` event: queue jest widoczna, ale join/submissions sa zamkniete.
 - [ ] `closed` event: submit jest zamkniety; snapshot kolejki jest traktowany zgodnie z aktualna polityka public API.
+- [ ] `invite_required` bez participant access nadal pozwala czytac publiczna kolejke, ale nie submitowac.
+- [ ] `publicJoinEnabled=false` nie blokuje odczytu publicznej kolejki.
 - [ ] `archived` i `cancelled` nie sa widoczne przez public queue.
 - [ ] Event albo venue ukryte administracyjnie nie ujawniaja prywatnego stanu publicznemu uzytkownikowi.
 

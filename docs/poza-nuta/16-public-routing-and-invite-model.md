@@ -19,11 +19,12 @@ The target public routing model is event-first for the participant flow and hand
 1. `/` is a bounded public discovery homepage for current events, upcoming events, and visible venues.
 2. `/@:handle` is the public profile for a venue, organizer, or brand.
 3. `/event/:eventPublicId` is the main public page for a concrete event.
-4. `/invite/:inviteCode` is a magic invite link issued by an operator.
-5. `/:venueSlug` may remain temporarily as a read-only legacy venue page, but it links only to canonical event pages.
-6. Venue-scoped join, queue, and event-slug routes return 404 and do not redirect.
-7. There is no separate global `/events` route in this decision.
-8. Event slugs are not the primary public event identity.
+4. `/event/:eventPublicId/queue` is the canonical read-only public queue page for that event.
+5. `/invite/:inviteCode` is a magic invite link issued by an operator.
+6. `/:venueSlug` may remain temporarily as a read-only legacy venue page, but it links only to canonical event pages.
+7. Venue-scoped join, queue, and event-slug routes return 404 and do not redirect.
+8. There is no separate global `/events` route in this decision.
+9. Event slugs are not the primary public event identity.
 
 This keeps the public UX shareable, stable, and privacy-aware while preventing venue lookup from silently choosing a participant's event.
 
@@ -69,9 +70,17 @@ Expected future behavior:
 
 ### `/event/:eventPublicId/queue`
 
-Future canonical standalone public queue route for a concrete event.
+Canonical standalone, read-only public queue route for a concrete event.
 
-It is not implemented yet. The current `/event/:eventPublicId` page already renders the event-scoped public queue when policy allows it. A follow-up may extract that queue into this URL without reintroducing venue-scoped lookup.
+Rules:
+
+- resolve the event only through `eventPublicId`, never through a venue slug;
+- allow direct access to `public` and `unlisted` events when `publicQueueEnabled=true`;
+- return the public not-found path for `private`, `draft`, `archived`, and `cancelled` events;
+- show a controlled unavailable state for `scheduled` events and for a disabled public queue;
+- show queue snapshots for `active`, `paused`, and `closed` events;
+- do not require participant access to read a public queue: `invite_required` controls submit, not queue visibility;
+- do not render submit, invite claim, or operator controls on the queue page.
 
 ### `/invite/:inviteCode`
 
