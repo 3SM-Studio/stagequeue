@@ -1,10 +1,12 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 import {
   approveRequest,
   archiveDashboardEvent,
   assertDashboardEventResponse,
   assertDashboardCreatedEventResponse,
+  assertDashboardInviteResponse,
   assertOperatorQueueResponse,
   assertMeResponse,
   assertPlatformSetupStatusResponse,
@@ -21,6 +23,7 @@ import {
   DashboardApiError,
   doneRequest,
   getDashboardEvent,
+  getDashboardEventInvite,
   getDashboardApiBaseUrl,
   getMe,
   getOperatorQueue,
@@ -34,13 +37,16 @@ import {
   type DashboardEventSummary,
   type OperatorQueueItem,
   rejectRequest,
+  revokeDashboardEventInvite,
   resumeDashboardEvent,
+  rotateDashboardEventInvite,
   skipRequest,
   startDashboardEvent,
   startRequest,
   type DashboardFetch,
   updateDashboardEventFlags
 } from "../apps/dashboard-web/lib/apiClient.ts"
+import { copyInviteUrl } from "../apps/dashboard-web/lib/eventInviteClipboard.ts"
 import {
   buildGoogleSignInOptions,
   DASHBOARD_AUTH_BASE_PATH,
@@ -722,6 +728,108 @@ test("dashboard-web getDashboardEvent uses GET event endpoint and credentials in
   assert.equal(requestedCredentials, "include")
   assert.equal(requestedMethod, undefined)
   assert.equal(result.event.publicJoinEnabled, true)
+})
+
+test("dashboard-web invite client uses protected read rotate and revoke endpoints", async () => {
+  const calls: Array<{ credentials: RequestCredentials | undefined; method: string | undefined; url: string }> = []
+  const fetchImpl: DashboardFetch = async (input, init) => {
+    const url = String(input)
+    calls.push({ credentials: init?.credentials, method: init?.method, url })
+    return jsonResponse(url.endsWith("/revoke") ? { invite: null } : activeDashboardInviteResponse())
+  }
+
+  const current = await getDashboardEventInvite("event-1", { fetchImpl })
+  const rotated = await rotateDashboardEventInvite("event-1", { fetchImpl })
+  const revoked = await revokeDashboardEventInvite("event-1", { fetchImpl })
+
+  assert.equal(current.invite?.inviteUrl, "https://public.example/invite/inviteCode1")
+  assert.equal(rotated.invite?.code, "inviteCode1")
+  assert.equal(revoked.invite, null)
+  assert.deepEqual(
+    calls.map((call) => call.url),
+    [
+      "http://localhost:4321/dashboard/events/event-1/invite",
+      "http://localhost:4321/dashboard/events/event-1/invite/rotate",
+      "http://localhost:4321/dashboard/events/event-1/invite/revoke"
+    ]
+  )
+  assert.deepEqual(calls.map((call) => call.method), [undefined, "POST", "POST"])
+  assert.equal(calls.every((call) => call.credentials === "include"), true)
+})
+
+test("dashboard-web validates invite API responses", () => {
+  assert.equal(assertDashboardInviteResponse(activeDashboardInviteResponse()).invite?.status, "active")
+  assert.deepEqual(assertDashboardInviteResponse({ invite: null }), { invite: null })
+  assert.throws(
+    () =>
+      assertDashboardInviteResponse({
+        invite: {
+          code: "inviteCode1",
+          status: "active",
+          expiresAt: null
+        }
+      }),
+    /Invalid dashboard API response: event invite/
+  )
+  assert.throws(
+    () =>
+      assertDashboardInviteResponse({
+        invite: {
+          ...activeDashboardInviteResponse().invite,
+          inviteUrl: "/invite/inviteCode1"
+        }
+      }),
+    /Invalid dashboard API response: event invite/
+  )
+})
+
+test("EventInvitePanel covers active loading error and revoked states", () => {
+  const source = readFileSync("apps/dashboard-web/components/EventInvitePanel.tsx", "utf8")
+
+  for (const copy of [
+    "Pobieranie aktywnego kodu...",
+    "To wydarzenie nie ma aktywnego kodu zaproszenia.",
+    "Kopiuj link",
+    "Wygeneruj nowy kod",
+    "Unieważnij kod",
+    "Bez kodu QR gość zobaczy wydarzenie, ale nie doda zgłoszenia.",
+    "Osoby, które już uzyskały dostęp, mogą nadal mieć aktywny"
+  ]) {
+    assert.equal(source.includes(copy), true)
+  }
+  assert.match(source, /state\.kind === "error"/)
+  assert.doesNotMatch(source, /JoinForm/)
+})
+
+test("EventInvitePanel binds QR and clipboard to inviteUrl without localStorage", () => {
+  const source = readFileSync("apps/dashboard-web/components/EventInvitePanel.tsx", "utf8")
+
+  assert.match(source, /<QRCodeSVG[\s\S]*value=\{invite\.inviteUrl\}/)
+  assert.match(source, /copyInviteUrl\(state\.invite\.inviteUrl\)/)
+  assert.doesNotMatch(source, /localStorage/)
+})
+
+test("dashboard invite clipboard copies the URL and handles unavailable or rejected writes", async () => {
+  const writes: string[] = []
+
+  assert.equal(
+    await copyInviteUrl("https://public.example/invite/inviteCode1", {
+      writeText: async (value) => {
+        writes.push(value)
+      }
+    }),
+    "copied"
+  )
+  assert.deepEqual(writes, ["https://public.example/invite/inviteCode1"])
+  assert.equal(await copyInviteUrl("https://public.example/invite/inviteCode1", undefined), "unavailable")
+  assert.equal(
+    await copyInviteUrl("https://public.example/invite/inviteCode1", {
+      writeText: async () => {
+        throw new Error("Clipboard denied")
+      }
+    }),
+    "failed"
+  )
 })
 
 test("dashboard-web lifecycle helpers use POST endpoints and credentials include", async () => {
@@ -1561,7 +1669,20 @@ function dashboardEventDetail(
     endsAt: null,
     publicJoinEnabled: true,
     publicQueueEnabled: true,
+    joinAccessMode: "invite_required",
     ...overrides
+  }
+}
+
+function activeDashboardInviteResponse() {
+  return {
+    invite: {
+      code: "inviteCode1",
+      status: "active" as const,
+      expiresAt: null,
+      inviteUrl: "https://public.example/invite/inviteCode1",
+      urlPath: "/invite/inviteCode1"
+    }
   }
 }
 

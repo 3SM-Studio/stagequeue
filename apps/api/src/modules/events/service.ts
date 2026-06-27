@@ -16,7 +16,7 @@ import {
   type EventVisibility
 } from "@poza-nuta/db"
 import { randomBytes } from "node:crypto"
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { ApiHttpError } from "../../errors.ts"
 import type { DomainEventBus, DomainEventType } from "../../plugins/eventBus.ts"
 import {
@@ -60,9 +60,14 @@ export type DashboardEventSummary = EventSummary & {
     name: string
     slug: string
   }
+}
+
+export type DashboardEventWithInvite = DashboardEventSummary & {
   invite: {
     code: string
     urlPath: string
+    status: "active" | "revoked"
+    expiresAt: Date | null
   } | null
 }
 
@@ -170,6 +175,8 @@ export type PublicInviteClaim = {
 export type DashboardInviteLink = {
   code: string
   urlPath: string
+  status: "active" | "revoked"
+  expiresAt: Date | null
 }
 
 export type DashboardInviteMutationResult = {
@@ -219,7 +226,8 @@ export type LifecycleAction = "start" | "pause" | "resume" | "close" | "archive"
 export type EventsService = {
   listForUser(userId: string, options?: { includeAll?: boolean }): Promise<DashboardEventSummary[]>
   getById(eventId: string): Promise<EventSummary | null>
-  getDashboardById(eventId: string): Promise<DashboardEventSummary | null>
+  getDashboardById(eventId: string): Promise<DashboardEventWithInvite | null>
+  getActiveEventInvite(eventId: string): Promise<DashboardInviteLink | null>
   createEvent(input: CreateEventInput): Promise<EventSummary>
   patchEvent(eventId: string, input: PatchEventInput): Promise<EventSummary>
   changeLifecycle(eventId: string, action: LifecycleAction, actorUserId: string): Promise<EventSummary>
@@ -275,8 +283,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
           .from(events)
           .innerJoin(venues, eq(events.venueId, venues.id))
           .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
-          .leftJoin(eventInvites, and(eq(eventInvites.eventId, events.id), eq(eventInvites.status, "active")))
-        return uniqueDashboardEvents(rows.map(mapDashboardEventRow))
+        return rows.map(mapDashboardEventRow)
       }
 
       const rows = await db
@@ -298,10 +305,9 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
         )
         .innerJoin(venues, eq(events.venueId, venues.id))
         .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
-        .leftJoin(eventInvites, and(eq(eventInvites.eventId, events.id), eq(eventInvites.status, "active")))
         .where(and(eq(organizationMemberships.userId, userId), eq(organizationMemberships.status, "active")))
 
-      return uniqueDashboardEvents(rows.map(mapDashboardEventRow))
+      return rows.map(mapDashboardEventRow)
     },
 
     async getById(eventId) {
@@ -311,15 +317,45 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
 
     async getDashboardById(eventId) {
       const rows = await db
-        .select(dashboardEventSelection)
+        .select(dashboardEventWithInviteSelection)
         .from(events)
         .innerJoin(venues, eq(events.venueId, venues.id))
         .innerJoin(organizations, eq(events.operatedByOrganizationId, organizations.id))
         .leftJoin(eventInvites, and(eq(eventInvites.eventId, events.id), eq(eventInvites.status, "active")))
         .where(eq(events.id, eventId))
+        .orderBy(desc(eventInvites.createdAt), desc(eventInvites.id))
         .limit(1)
 
-      return rows[0] ? mapDashboardEventRow(rows[0]) : null
+      return rows[0] ? mapDashboardEventWithInviteRow(rows[0]) : null
+    },
+
+    async getActiveEventInvite(eventId) {
+      const rows = await db
+        .select({
+          code: eventInvites.code,
+          status: eventInvites.status,
+          expiresAt: eventInvites.expiresAt
+        })
+        .from(eventInvites)
+        .where(
+          and(
+            eq(eventInvites.eventId, eventId),
+            eq(eventInvites.status, "active"),
+            or(isNull(eventInvites.expiresAt), sql`${eventInvites.expiresAt} > now()`)
+          )
+        )
+        .orderBy(desc(eventInvites.createdAt), desc(eventInvites.id))
+        .limit(1)
+      const invite = rows[0]
+
+      return invite
+        ? {
+            code: invite.code,
+            status: invite.status === "revoked" ? "revoked" : "active",
+            expiresAt: invite.expiresAt,
+            urlPath: `/invite/${invite.code}`
+          }
+        : null
     },
 
     async createEvent(input) {
@@ -890,7 +926,7 @@ async function insertActiveInviteWithGeneratedCode(db: DbClient, eventId: string
         code,
         status: "active"
       })
-      return { code, urlPath: `/invite/${code}` }
+      return { code, status: "active", expiresAt: null, urlPath: `/invite/${code}` }
     } catch (error) {
       if (isPgUniqueViolation(error) && error.constraint === "event_invites_code_unique") {
         inviteCodeCollision = error
@@ -970,8 +1006,14 @@ const dashboardEventSelection = {
   venueName: venues.name,
   venueSlug: venues.slug,
   organizationName: organizations.name,
-  organizationSlug: organizations.slug,
-  inviteCode: eventInvites.code
+  organizationSlug: organizations.slug
+}
+
+const dashboardEventWithInviteSelection = {
+  ...dashboardEventSelection,
+  inviteCode: eventInvites.code,
+  inviteStatus: eventInvites.status,
+  inviteExpiresAt: eventInvites.expiresAt
 }
 
 const publicEventDetailSelection = {
@@ -1229,7 +1271,12 @@ type DashboardEventRow = EventSummary & {
   venueSlug: string
   organizationName: string
   organizationSlug: string
+}
+
+type DashboardEventWithInviteRow = DashboardEventRow & {
   inviteCode: string | null
+  inviteStatus: string | null
+  inviteExpiresAt: Date | null
 }
 
 function mapDashboardEventRow(row: DashboardEventRow): DashboardEventSummary {
@@ -1257,13 +1304,22 @@ function mapDashboardEventRow(row: DashboardEventRow): DashboardEventSummary {
       id: row.operatedByOrganizationId,
       name: row.organizationName,
       slug: row.organizationSlug
-    },
-    invite: row.inviteCode ? { code: row.inviteCode, urlPath: `/invite/${row.inviteCode}` } : null
+    }
   }
 }
 
-function uniqueDashboardEvents(eventsList: DashboardEventSummary[]): DashboardEventSummary[] {
-  return [...new Map(eventsList.map((event) => [event.id, event])).values()]
+function mapDashboardEventWithInviteRow(row: DashboardEventWithInviteRow): DashboardEventWithInvite {
+  return {
+    ...mapDashboardEventRow(row),
+    invite: row.inviteCode
+      ? {
+          code: row.inviteCode,
+          status: row.inviteStatus === "revoked" ? "revoked" : "active",
+          expiresAt: row.inviteExpiresAt,
+          urlPath: `/invite/${row.inviteCode}`
+        }
+      : null
+  }
 }
 
 const staffSelection = {

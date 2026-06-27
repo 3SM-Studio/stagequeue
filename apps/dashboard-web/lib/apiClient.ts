@@ -71,6 +71,7 @@ export type QueueActionResponse = {
 
 export type DashboardEventStatus = "draft" | "scheduled" | "active" | "paused" | "closed" | "archived" | "cancelled"
 export type DashboardEventVisibility = "public" | "unlisted" | "private"
+export type DashboardJoinAccessMode = "open" | "invite_required"
 
 export type DashboardEventSummary = {
   id: string
@@ -117,6 +118,7 @@ export type DashboardEventDetail = {
   endsAt: string | null
   publicJoinEnabled: boolean
   publicQueueEnabled: boolean
+  joinAccessMode: DashboardJoinAccessMode
 }
 
 export type DashboardEventsResponse = {
@@ -129,6 +131,18 @@ export type DashboardVenuesResponse = {
 
 export type DashboardEventResponse = {
   event: DashboardEventDetail
+}
+
+export type DashboardInvite = {
+  code: string
+  status: "active" | "revoked"
+  expiresAt: string | null
+  inviteUrl: string
+  urlPath?: string
+}
+
+export type DashboardInviteResponse = {
+  invite: DashboardInvite | null
 }
 
 export type DashboardCreatedEventResponse = {
@@ -291,6 +305,29 @@ export async function getDashboardEvent(
   return assertDashboardEventResponse(
     await fetchDashboardJson(`/dashboard/events/${encodeURIComponent(eventId)}`, {}, options.fetchImpl)
   )
+}
+
+export async function getDashboardEventInvite(
+  eventId: string,
+  options: { fetchImpl?: DashboardFetch } = {}
+): Promise<DashboardInviteResponse> {
+  return assertDashboardInviteResponse(
+    await fetchDashboardJson(`/dashboard/events/${encodeURIComponent(eventId)}/invite`, {}, options.fetchImpl)
+  )
+}
+
+export async function rotateDashboardEventInvite(
+  eventId: string,
+  options: DashboardFetchOptions = {}
+): Promise<DashboardInviteResponse> {
+  return mutateDashboardEventInvite(eventId, "rotate", options)
+}
+
+export async function revokeDashboardEventInvite(
+  eventId: string,
+  options: DashboardFetchOptions = {}
+): Promise<DashboardInviteResponse> {
+  return mutateDashboardEventInvite(eventId, "revoke", options)
 }
 
 export async function startDashboardEvent(eventId: string, options: DashboardFetchOptions = {}): Promise<DashboardEventResponse> {
@@ -711,6 +748,16 @@ export function assertDashboardEventResponse(value: unknown): DashboardEventResp
   }
 }
 
+export function assertDashboardInviteResponse(value: unknown): DashboardInviteResponse {
+  if (!isRecord(value) || (value.invite !== null && !isDashboardInvite(value.invite))) {
+    throw new Error("Invalid dashboard API response: event invite")
+  }
+
+  return {
+    invite: value.invite
+  }
+}
+
 export function assertDashboardCreatedEventResponse(value: unknown): DashboardCreatedEventResponse {
   if (!isRecord(value) || !isDashboardEventSummary(value.event)) {
     throw new Error("Invalid dashboard API response: created event")
@@ -794,7 +841,22 @@ function isDashboardEventDetail(value: unknown): value is DashboardEventDetail {
     (typeof value.startsAt === "string" || value.startsAt === null) &&
     (typeof value.endsAt === "string" || value.endsAt === null) &&
     typeof value.publicJoinEnabled === "boolean" &&
-    typeof value.publicQueueEnabled === "boolean"
+    typeof value.publicQueueEnabled === "boolean" &&
+    isDashboardJoinAccessMode(value.joinAccessMode)
+  )
+}
+
+function isDashboardInvite(value: unknown): value is DashboardInvite {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    typeof value.code === "string" &&
+    (value.status === "active" || value.status === "revoked") &&
+    (typeof value.expiresAt === "string" || value.expiresAt === null) &&
+    isAbsoluteHttpUrl(value.inviteUrl) &&
+    (value.urlPath === undefined || typeof value.urlPath === "string")
   )
 }
 
@@ -890,6 +952,23 @@ function isDashboardEventVisibility(value: unknown): value is DashboardEventVisi
   return value === "public" || value === "unlisted" || value === "private"
 }
 
+function isDashboardJoinAccessMode(value: unknown): value is DashboardJoinAccessMode {
+  return value === "open" || value === "invite_required"
+}
+
+function isAbsoluteHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false
+  }
+
+  try {
+    const url = new URL(value)
+    return url.protocol === "http:" || url.protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
 function isDashboardAccessReason(value: unknown): value is DashboardAccessReason {
   return (
     value === "unauthenticated" ||
@@ -898,4 +977,19 @@ function isDashboardAccessReason(value: unknown): value is DashboardAccessReason
     value === "active_user" ||
     value === "platform_role"
   )
+}
+
+function mutateDashboardEventInvite(
+  eventId: string,
+  action: "rotate" | "revoke",
+  options: DashboardFetchOptions
+): Promise<DashboardInviteResponse> {
+  return fetchDashboardJson(
+    `/dashboard/events/${encodeURIComponent(eventId)}/invite/${action}`,
+    {
+      method: "POST",
+      timeoutMs: options.timeoutMs ?? DASHBOARD_MUTATION_TIMEOUT_MS
+    },
+    options.fetchImpl
+  ).then(assertDashboardInviteResponse)
 }
