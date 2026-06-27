@@ -108,7 +108,7 @@ Poczekaj na zatwierdzenie prowadzacego.
    - `Pending`;
    - approved queue;
    - historia: done/rejected/skipped.
-5. Wyslij request z public join i potwierdz, ze pending pojawia sie w dashboard queue bez F5, w oczekiwanym czasie safe refreshu.
+5. Wyslij request z public join i potwierdz, ze pending pojawia sie w dashboard queue przez SSE bez F5.
 6. Kliknij `Approve`.
 7. Sprawdz, ze request przechodzi do approved queue i dostaje pozycje.
 8. Kliknij `Reject` na osobnym pending requestcie i potwierdz status rejected.
@@ -123,9 +123,9 @@ Poczekaj na zatwierdzenie prowadzacego.
 ## 6. Live Update and SSE Checks
 
 - [ ] Uczestnik wysyla request w public join.
-- [ ] Operator widzi pending bez manualnego reloadu, przez bezpieczny refresh/SSE fallback.
+- [ ] Operator widzi pending bez manualnego reloadu, po zdarzeniu SSE.
 - [ ] Operator approve/start/done aktualizuje public queue i status uczestnika.
-- [ ] Public queue reaguje na `queue.updated` albo safe refresh.
+- [ ] Public queue reaguje na `queue.updated` przez pojedynczy refetch snapshotu.
 - [ ] Public join reaguje na zmiany statusu eventu: pause/resume/close.
 - [ ] SSE disconnect jest non-fatal: UI nie crashuje i nadal da sie uzyc manual refreshu.
 - [ ] Po nawigacji tam i z powrotem nie powstaja duplikaty subskrypcji.
@@ -232,8 +232,8 @@ Blockery release:
 
 Akceptowalne ostrzezenia, jesli sa opisane w release notes:
 
-- realtime listy eventow w dashboardzie odswieza sie przez safe refresh, nie przez natychmiastowy stream;
-- opoznienie statusu public join wynosi kilka sekund;
+- lista eventow w dashboardzie nie jest widokiem live i odswieza sie tylko recznie albo jednorazowo po focus/visibility;
+- opoznienie statusu public join zalezy od dostarczenia SSE albo reconnectu;
 - manualny refresh jest potrzebny po odzyskaniu sieci;
 - event-specific public slug routes sa nadal placeholderami, jesli nie sa czescia release.
 

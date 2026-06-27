@@ -2,7 +2,8 @@
 
 ## Decision
 
-SSE first. HTTP mutations for actions. Polling only as fallback/prototype. WebSocket only after bidirectional needs exist.
+SSE is the only live browser transport. HTTP mutations remain the action path. Interval/timeout-loop polling and
+cyclic snapshot fetching are not fallback transports. WebSocket remains deferred until bidirectional needs exist.
 
 ## Target streams
 
@@ -65,9 +66,11 @@ context. Internal event, venue, request and organization identifiers stay inside
 dashboard stream. Dashboard event streams retain their authenticated internal payload because the operator client
 is authorized for the concrete event.
 
-The public queue client refetches its event-scoped queue snapshot after every relevant frame and after every
-EventSource `open`, including reconnect. Focus and visibility refresh provide a light fallback without aggressive
-polling. The dashboard operator queue keeps its existing five-second visible-page polling fallback.
+The public queue and dashboard operator clients refetch their event-scoped snapshots after every relevant frame
+and after every EventSource `open`, including reconnect. A domain event received after an error restores the live
+connection state. Focus and visibility may trigger one one-shot refresh, and manual refresh remains available.
+There is no interval polling fallback. The dashboard events list has no per-event stream; it uses only its initial
+snapshot plus manual and one-shot focus/visibility refresh.
 
 The server sends a `: ping` heartbeat comment every 20 seconds and unsubscribes from the EventBus when the HTTP
 connection closes. SSE remains best-effort and has no replay; reconnect refetch is the recovery mechanism.

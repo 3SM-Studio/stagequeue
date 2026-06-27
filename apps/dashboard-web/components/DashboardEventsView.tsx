@@ -10,14 +10,12 @@ import {
   applyDashboardEventsRefreshStart,
   applyDashboardEventsRefreshSuccess,
   createDashboardEventsRefreshState,
-  DASHBOARD_EVENTS_REFRESH_INTERVAL_MS,
   filterDashboardEvents,
   getDashboardEventGroupsForFilter,
   groupDashboardEvents,
   isOperationalEvent,
   MANUAL_EVENT_ID_FALLBACK_DESCRIPTION,
   MANUAL_EVENT_ID_FALLBACK_TITLE,
-  shouldPollDashboardEvents,
   shouldRefreshDashboardEventsOnFocus
 } from "../lib/eventsState"
 import { buildDashboardEventQueuePath, listDashboardEvents } from "../lib/apiClient"
@@ -98,16 +96,6 @@ export function DashboardEventsView({ events: initialEvents }: DashboardEventsVi
     }
   }, [refresh])
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      if (shouldPollDashboardEvents(document.visibilityState)) {
-        void refresh()
-      }
-    }, DASHBOARD_EVENTS_REFRESH_INTERVAL_MS)
-
-    return () => window.clearInterval(interval)
-  }, [refresh])
-
   return (
     <>
       <section className="panel">
@@ -145,8 +133,7 @@ export function DashboardEventsView({ events: initialEvents }: DashboardEventsVi
         </div>
 
         <p className="muted">
-          Lista odswieza sie recznie, po powrocie do karty i co 15 sekund, gdy karta jest widoczna. Akcje operatora maja
-          priorytet nad realtime listy.
+          Lista odswieza sie recznie i jednorazowo po powrocie do karty. Nie jest widokiem live.
         </p>
         {refreshState.error ? (
           <p className="notice warning" role="status">

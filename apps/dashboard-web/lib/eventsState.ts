@@ -7,7 +7,6 @@ export const MANUAL_EVENT_ID_FALLBACK_TITLE = "Otworz kolejke po ID"
 export const MANUAL_EVENT_ID_FALLBACK_DESCRIPTION = "Awaryjnie, dla QA/dev."
 export const DASHBOARD_EVENTS_LIST_REFRESH_MODE = "focus" as const
 export const DASHBOARD_EVENTS_LIST_USES_EVENT_STREAMS = false
-export const DASHBOARD_EVENTS_REFRESH_INTERVAL_MS = 15000
 export const DASHBOARD_EVENTS_REFRESH_ERROR_MESSAGE = "Nie udalo sie odswiezyc listy wydarzen."
 export const MAX_DASHBOARD_EVENT_STREAM_SUBSCRIPTIONS = 1
 export const dashboardEventsRefetchEvents = [
@@ -197,10 +196,6 @@ export function getDashboardEventsStreamErrorState(): { fatal: false; kind: "sta
 
 export function shouldRefreshDashboardEventsOnFocus(eventType: "focus" | "visibilitychange", visibilityState = "visible"): boolean {
   return eventType === "focus" || (eventType === "visibilitychange" && visibilityState === "visible")
-}
-
-export function shouldPollDashboardEvents(visibilityState: string): boolean {
-  return visibilityState === "visible"
 }
 
 export function getDashboardEventsErrorState(error: unknown): DashboardEventsErrorState {

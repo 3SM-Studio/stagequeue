@@ -37,9 +37,8 @@ import {
   getOperatorQueueErrorState,
   type OperatorQueueStreamStatus,
   OPERATOR_QUEUE_REFRESH_ERROR_MESSAGE,
-  OPERATOR_QUEUE_REFRESH_INTERVAL_MS,
   runOperatorActionWithPending,
-  shouldPollOperatorQueue
+  shouldRefreshOperatorQueueOnFocus
 } from "../lib/operatorQueueState"
 import { createOperatorQueueStream } from "../lib/operatorQueueStream"
 import { createRefetchScheduler } from "../lib/refetchScheduler"
@@ -107,7 +106,7 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
 
   useEffect(() => {
     if (typeof EventSource === "undefined") {
-      setStreamStatus("disconnected")
+      setStreamStatus("reconnecting")
       return
     }
 
@@ -134,27 +133,21 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
 
   useEffect(() => {
     const onFocus = () => {
-      if (shouldPollOperatorQueue(document.visibilityState, busyActionRef.current)) {
+      if (shouldRefreshOperatorQueueOnFocus(document.visibilityState, busyActionRef.current)) {
         void refresh({ skipWhenBusy: true })
       }
     }
     const onVisibilityChange = () => {
-      if (shouldPollOperatorQueue(document.visibilityState, busyActionRef.current)) {
+      if (shouldRefreshOperatorQueueOnFocus(document.visibilityState, busyActionRef.current)) {
         void refresh({ skipWhenBusy: true })
       }
     }
-    const interval = window.setInterval(() => {
-      if (shouldPollOperatorQueue(document.visibilityState, busyActionRef.current)) {
-        void refresh({ skipWhenBusy: true })
-      }
-    }, OPERATOR_QUEUE_REFRESH_INTERVAL_MS)
 
     window.addEventListener("focus", onFocus)
     document.addEventListener("visibilitychange", onVisibilityChange)
     return () => {
       window.removeEventListener("focus", onFocus)
       document.removeEventListener("visibilitychange", onVisibilityChange)
-      window.clearInterval(interval)
     }
   }, [refresh])
 
@@ -243,7 +236,7 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
         </div>
         <div className="queue-header-actions">
           <span className={`stream-pill ${streamStatus === "connected" ? "connected" : "disconnected"}`}>
-            {streamStatus === "connected" ? "live" : streamStatus === "connecting" ? "connecting" : "live disconnected"}
+            {streamStatus === "connected" ? "Live" : streamStatus === "connecting" ? "Łączenie" : "Ponowne łączenie"}
           </span>
           <button className="button secondary" disabled={refreshing || busyAction !== null} type="button" onClick={() => void refresh()}>
             {refreshing ? "Odswiezanie..." : "Odswiez kolejke"}
@@ -281,7 +274,7 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
         </section>
       ) : null}
 
-      {streamStatus === "disconnected" ? (
+      {streamStatus === "reconnecting" ? (
         <section className="notice warning">
           <span>{getOperatorQueueStreamErrorState().message}</span>
         </section>
