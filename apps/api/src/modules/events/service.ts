@@ -794,7 +794,7 @@ export function createEventsService(db: DbClient, eventBus?: DomainEventBus): Ev
 
         return {
           eventPublicId: row.event.publicId,
-          redirectTo: `/event/${row.event.publicId}`
+          redirectTo: `/event/${row.event.publicId}/session`
         }
       })
     },

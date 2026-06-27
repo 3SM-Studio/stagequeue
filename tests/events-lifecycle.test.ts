@@ -1130,7 +1130,7 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
       }
       return {
         eventPublicId: event.publicId,
-        redirectTo: `/event/${event.publicId}`
+        redirectTo: `/event/${event.publicId}/session`
       }
     },
     async revokeEventInvite(eventId) {
