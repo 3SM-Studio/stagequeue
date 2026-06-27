@@ -216,10 +216,10 @@ Target realtime work should focus on these future surfaces:
 
 Realtime implementation should preserve the current safety lessons:
 
-- prefer one bounded stream or safe refresh strategy per page;
+- prefer one bounded stream per live page;
 - avoid EventSource-per-event patterns on list pages;
 - keep operator mutations and public submit stable even if realtime reconnects;
-- keep manual refresh or safe polling as fallback where it improves live-event resilience.
+- keep manual and one-shot focus/visibility refresh as recovery paths; do not add cyclic polling.
 
 ## Security Considerations
 
@@ -251,7 +251,7 @@ Realtime implementation should preserve the current safety lessons:
    - queue section;
    - join form state;
    - participant my-request tracking;
-   - realtime/safe refresh for status and flags.
+   - SSE-driven snapshot refresh for status and flags.
 5. Add invite model:
    - invite generation/rotation/revocation backend contract;
    - `/invite/:inviteCode` claim endpoint/page;

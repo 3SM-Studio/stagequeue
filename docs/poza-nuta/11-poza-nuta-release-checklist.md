@@ -7,6 +7,6 @@
 - [ ] Permission regression tests passed.
 - [ ] Public API contract tests passed.
 - [ ] DB migrations reviewed.
-- [ ] SSE/polling behavior checked if queue touched.
+- [ ] SSE open/reconnect/domain-event behavior and absence of cyclic polling checked if queue touched.
 - [ ] Env variables documented.
 - [ ] Rollback/roll-forward plan exists.

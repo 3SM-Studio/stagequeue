@@ -1,6 +1,5 @@
 import type { PublicMyRequest } from "./apiClient.ts"
 
-export const PUBLIC_MY_REQUESTS_REFRESH_INTERVAL_MS = 5000
 export const PUBLIC_MY_REQUESTS_REFRESH_ERROR_MESSAGE = "Nie udalo sie odswiezyc statusu zgloszenia."
 
 const activeTrackedStatuses: readonly PublicMyRequest["status"][] = ["pending", "approved", "now"]
@@ -13,7 +12,7 @@ export function getTrackedRequest(requests: PublicMyRequest[], trackedRequestId:
   return requests.find((request) => request.id === trackedRequestId) ?? null
 }
 
-export function shouldPollMyRequests(request: PublicMyRequest | null, visibilityState: string): boolean {
+export function shouldRefreshMyRequestsOnFocus(request: PublicMyRequest | null, visibilityState: string): boolean {
   return visibilityState === "visible" && request !== null && activeTrackedStatuses.includes(request.status)
 }
 

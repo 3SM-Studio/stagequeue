@@ -36,7 +36,10 @@ Use Better Auth inside Fastify API. Start with Google OAuth and httpOnly secure 
 
 ## ADR-007 — SSE first
 
-Use Server-Sent Events first for queue/operator/import updates. Polling only fallback/prototype. WebSocket later only if bidirectional needs appear.
+Use Server-Sent Events as the only live browser transport for queue/operator/import updates. Initial snapshots,
+EventSource open/reconnect/domain-event refetches, manual refresh, successful-mutation refresh, and one-shot
+focus/visibility refresh are allowed. Cyclic polling is not. WebSocket remains deferred until bidirectional needs
+appear.
 
 ## ADR-008 — Global song catalog
 

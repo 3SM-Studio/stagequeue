@@ -8,11 +8,11 @@ import { createRefetchScheduler } from "../lib/refetchScheduler"
 export function PublicQueueView({
   eventPublicId,
   initialQueue,
-  onLifecycleEvent
+  onRealtimeRefresh
 }: {
   eventPublicId: string
   initialQueue: PublicQueue
-  onLifecycleEvent?: () => void
+  onRealtimeRefresh?: () => void
 }) {
   const [queue, setQueue] = useState(initialQueue)
   const [status, setStatus] = useState<PublicQueueStreamStatus>("connecting")
@@ -24,7 +24,6 @@ export function PublicQueueView({
       setError(null)
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Nie udało się odświeżyć kolejki.")
-      setStatus("stale")
     }
   }, [eventPublicId])
 
@@ -37,11 +36,12 @@ export function PublicQueueView({
     const scheduler = createRefetchScheduler(refresh)
     const stream = createPublicQueueStream({
       eventSourceFactory: (url, init) => new EventSource(url, init),
-      onEvent: (eventType) => {
-        if (eventType.startsWith("event.")) {
-          onLifecycleEvent?.()
-        }
-      },
+      ...(onRealtimeRefresh
+        ? {
+            onEvent: onRealtimeRefresh,
+            onOpen: onRealtimeRefresh
+          }
+        : {}),
       onRefetch: scheduler.schedule,
       onStatusChange: (nextStatus) => {
         if (mounted) {
@@ -56,7 +56,7 @@ export function PublicQueueView({
       scheduler.cancel()
       stream.close()
     }
-  }, [eventPublicId, onLifecycleEvent, refresh])
+  }, [eventPublicId, onRealtimeRefresh, refresh])
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -137,8 +137,8 @@ function statusLabel(status: PublicQueueStreamStatus): string {
   if (status === "connected") {
     return "Live"
   }
-  if (status === "stale") {
-    return "Łączenie"
+  if (status === "reconnecting") {
+    return "Ponowne łączenie"
   }
-  return "Start"
+  return "Łączenie"
 }

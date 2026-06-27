@@ -17,7 +17,6 @@ export type OperatorQueueRefreshState = {
   snapshot: OperatorQueueSnapshot
 }
 
-export const OPERATOR_QUEUE_REFRESH_INTERVAL_MS = 5000
 export const OPERATOR_QUEUE_REFRESH_ERROR_MESSAGE = "Nie udalo sie odswiezyc kolejki."
 
 export const operatorQueueRefetchEvents = [
@@ -37,7 +36,7 @@ export const operatorQueueRefetchEvents = [
   "event.cancelled"
 ] as const
 
-export type OperatorQueueStreamStatus = "connecting" | "connected" | "disconnected"
+export type OperatorQueueStreamStatus = "connecting" | "connected" | "reconnecting"
 
 export function shouldRefetchOperatorQueue(eventType: string): boolean {
   return (operatorQueueRefetchEvents as readonly string[]).includes(eventType)
@@ -59,7 +58,7 @@ export function getOperatorQueueStreamErrorState() {
   } as const
 }
 
-export function shouldPollOperatorQueue(visibilityState: string, pendingAction: string | null): boolean {
+export function shouldRefreshOperatorQueueOnFocus(visibilityState: string, pendingAction: string | null): boolean {
   return visibilityState === "visible" && pendingAction === null
 }
 
