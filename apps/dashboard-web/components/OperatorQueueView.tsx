@@ -43,6 +43,7 @@ import {
 } from "../lib/operatorQueueState"
 import { createOperatorQueueStream } from "../lib/operatorQueueStream"
 import { createRefetchScheduler } from "../lib/refetchScheduler"
+import { EventInvitePanel } from "./EventInvitePanel"
 import { GoogleSignInButton } from "./GoogleSignInButton"
 
 export function OperatorQueueView({ eventId }: { eventId: string }) {
@@ -251,13 +252,20 @@ export function OperatorQueueView({ eventId }: { eventId: string }) {
       </section>
 
       {eventDetail ? (
-        <EventLifecyclePanel
-          busyAction={busyAction}
-          event={eventDetail}
-          venueName={queue.venue.name}
-          onFlagAction={runFlagAction}
-          onLifecycleAction={runLifecycleAction}
-        />
+        <>
+          <EventLifecyclePanel
+            busyAction={busyAction}
+            event={eventDetail}
+            venueName={queue.venue.name}
+            onFlagAction={runFlagAction}
+            onLifecycleAction={runLifecycleAction}
+          />
+          <EventInvitePanel
+            eventId={eventId}
+            joinAccessMode={eventDetail.joinAccessMode}
+            publicJoinEnabled={eventDetail.publicJoinEnabled}
+          />
+        </>
       ) : null}
 
       {error ? (

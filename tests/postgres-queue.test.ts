@@ -976,16 +976,38 @@ test("revoke invite is idempotent and blocks future claims without granting acce
   try {
     const firstRevoke = await app.inject({ method: "POST", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite/revoke` })
     const secondRevoke = await app.inject({ method: "POST", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite/revoke` })
+    const currentInvite = await app.inject({ method: "GET", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite` })
     const claim = await app.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
 
     assert.equal(firstRevoke.statusCode, 200)
     assert.equal(firstRevoke.json().invite, null)
     assert.equal(secondRevoke.statusCode, 200)
     assert.equal(secondRevoke.json().invite, null)
+    assert.deepEqual(currentInvite.json(), { invite: null })
     assert.equal(claim.statusCode, 404)
     assert.equal(claim.json().error.code, "NOT_FOUND")
     assert.equal(claim.json().error.message, "Invalid or expired invite")
     assert.equal(readAccessRows(db).length, 0)
+  } finally {
+    await app.close()
+  }
+})
+
+test("dashboard invite read does not expose an expired active invite", async () => {
+  const db = fakeDbForInviteMutation({
+    joinAccessMode: "invite_required",
+    expiresAt: new Date(Date.now() - 1_000)
+  })
+  const app = await createTestApp({
+    db,
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite` })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json(), { invite: null })
   } finally {
     await app.close()
   }
@@ -1048,15 +1070,22 @@ test("rotate invalidates old invite code and new code can be claimed", async () 
     permissions: fakePermissions({ event: new Set(["event.manage"]) })
   })
   try {
+    const currentInvite = await app.inject({ method: "GET", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite` })
     const rotate = await app.inject({ method: "POST", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite/rotate` })
+    const rotatedInvite = await app.inject({ method: "GET", url: `/dashboard/events/${ACTIVE_EVENT_ID}/invite` })
     const oldClaim = await app.inject({ method: "POST", url: "/public/invites/inviteCode1/claim" })
     const newCode = rotate.json().invite.code
     const newClaim = await app.inject({ method: "POST", url: `/public/invites/${newCode}/claim` })
 
     assert.equal(rotate.statusCode, 200)
+    assert.equal(currentInvite.json().invite.inviteUrl, "http://localhost:3000/invite/inviteCode1")
     assert.match(newCode, /^[A-Za-z0-9_-]{8,80}$/)
     assert.notEqual(newCode, "inviteCode1")
+    assert.equal(rotate.json().invite.status, "active")
+    assert.equal(rotate.json().invite.expiresAt, null)
     assert.equal(rotate.json().invite.urlPath, `/invite/${newCode}`)
+    assert.equal(rotate.json().invite.inviteUrl, `http://localhost:3000/invite/${newCode}`)
+    assert.equal(rotatedInvite.json().invite.inviteUrl, `http://localhost:3000/invite/${newCode}`)
     assert.equal(oldClaim.statusCode, 404)
     assert.equal(newClaim.statusCode, 200)
     assert.equal(newClaim.json().redirectTo, `/event/${ACTIVE_EVENT_PUBLIC_ID}`)
@@ -2835,6 +2864,7 @@ function fakeDbForInviteMutation(options: {
   status?: string
   joinAccessMode: "open" | "invite_required"
   accessRows?: ParticipantAccessRow[]
+  expiresAt?: Date | null
 }): DbResources & {
   state: {
     invites: Array<{ id: string; eventId: string; code: string; status: string; expiresAt: Date | null }>
@@ -2848,7 +2878,7 @@ function fakeDbForInviteMutation(options: {
         eventId: ACTIVE_EVENT_ID,
         code: "inviteCode1",
         status: "active",
-        expiresAt: null
+        expiresAt: options.expiresAt ?? null
       }
     ]
   }
@@ -2895,6 +2925,23 @@ function fakeDbForInviteMutation(options: {
               ]
             : []
         })
+      }
+
+      if (selection && "code" in selection && "status" in selection && "expiresAt" in selection) {
+        return queryChainWithWhere(() =>
+          state.invites
+            .filter(
+              (invite) =>
+                invite.eventId === ACTIVE_EVENT_ID &&
+                invite.status === "active" &&
+                (invite.expiresAt === null || invite.expiresAt.getTime() > Date.now())
+            )
+            .map((invite) => ({
+              code: invite.code,
+              status: invite.status,
+              expiresAt: invite.expiresAt
+            }))
+        )
       }
 
       if (selection && "publicId" in selection && "venueId" in selection) {
@@ -3073,6 +3120,9 @@ function queryChainWithWhere<T>(resolve: (condition: unknown) => T[]) {
     },
     where(condition: unknown) {
       result = resolve(condition)
+      return this
+    },
+    orderBy() {
       return this
     },
     limit() {

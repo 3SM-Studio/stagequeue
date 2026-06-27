@@ -433,6 +433,86 @@ textarea {
   margin-bottom: 1rem;
 }
 
+.event-invite-panel {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.event-invite-panel > p {
+  margin: 0;
+}
+
+.event-invite-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.event-invite-heading h2 {
+  margin: 0.2rem 0 0;
+}
+
+.event-invite-active {
+  display: grid;
+  grid-template-columns: minmax(15rem, 17rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.event-invite-qr {
+  display: grid;
+  width: min(100%, 17rem);
+  aspect-ratio: 1;
+  place-items: center;
+  background: #fff;
+  padding: 1rem;
+}
+
+.event-invite-qr svg {
+  width: 100%;
+  height: auto;
+}
+
+.event-invite-details,
+.event-invite-empty {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.event-invite-details label {
+  font-weight: 800;
+}
+
+.event-invite-details input {
+  min-width: 0;
+  font-family: "Courier New", monospace;
+}
+
+.event-invite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.event-invite-panel .notice {
+  margin: 0;
+}
+
+.notice.warning {
+  border-color: rgba(173, 113, 0, 0.4);
+}
+
+.notice.error {
+  border-color: rgba(200, 50, 67, 0.4);
+}
+
+.notice.success {
+  border-color: rgba(29, 123, 82, 0.4);
+}
+
 .event-control-main {
   display: flex;
   justify-content: space-between;
@@ -626,6 +706,10 @@ textarea {
 
   .event-control-main {
     display: grid;
+  }
+
+  .event-invite-active {
+    grid-template-columns: 1fr;
   }
 
   .event-control-status {

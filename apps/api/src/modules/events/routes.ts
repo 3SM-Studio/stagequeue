@@ -20,7 +20,7 @@ import {
   readSlug
 } from "../http/validation.ts"
 import { allowedEventStaffRoles } from "./service.ts"
-import type { CreateEventInput, PatchEventInput, PatchEventStaffInput } from "./service.ts"
+import type { CreateEventInput, DashboardInviteLink, PatchEventInput, PatchEventStaffInput } from "./service.ts"
 import { PARTICIPANT_COOKIE_NAME, hashParticipantToken, isValidParticipantToken, resolveParticipantToken } from "../queue/participant.ts"
 
 const lifecycleActions = ["start", "pause", "resume", "close", "archive", "cancel"] as const
@@ -164,12 +164,22 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     return { event }
   })
 
+  app.get("/dashboard/events/:eventId/invite", async (request) => {
+    const user = await requireActiveCurrentUser(request)
+    const eventId = readParamUuid(request.params, "eventId")
+    await requireEventManageOrSupport(app, user.id, eventId)
+
+    const invite = await app.events.getActiveEventInvite(eventId)
+    return { invite: mapDashboardInvite(invite, app.config.publicWebUrl) }
+  })
+
   app.post("/dashboard/events/:eventId/invite/revoke", async (request) => {
     const user = await requireActiveCurrentUser(request)
     const eventId = readParamUuid(request.params, "eventId")
     await requireEventManageOrSupport(app, user.id, eventId)
 
-    return app.events.revokeEventInvite(eventId)
+    const result = await app.events.revokeEventInvite(eventId)
+    return { invite: mapDashboardInvite(result.invite, app.config.publicWebUrl) }
   })
 
   app.post("/dashboard/events/:eventId/invite/rotate", async (request) => {
@@ -177,7 +187,8 @@ export async function registerEventDashboardRoutes(app: FastifyInstance): Promis
     const eventId = readParamUuid(request.params, "eventId")
     await requireEventManageOrSupport(app, user.id, eventId)
 
-    return app.events.rotateEventInvite(eventId)
+    const result = await app.events.rotateEventInvite(eventId)
+    return { invite: mapDashboardInvite(result.invite, app.config.publicWebUrl) }
   })
 
   for (const action of lifecycleActions) {
@@ -312,4 +323,18 @@ async function requireEventManageOrSupport(app: FastifyInstance, userId: string,
 
 function forbidden(): ApiHttpError {
   return new ApiHttpError(403, "FORBIDDEN", "Forbidden")
+}
+
+function mapDashboardInvite(invite: DashboardInviteLink | null, publicWebUrl: string) {
+  if (!invite) {
+    return null
+  }
+
+  return {
+    code: invite.code,
+    status: invite.status,
+    expiresAt: invite.expiresAt,
+    inviteUrl: new URL(invite.urlPath, publicWebUrl).toString(),
+    urlPath: invite.urlPath
+  }
 }

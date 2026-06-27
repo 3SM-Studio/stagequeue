@@ -20,6 +20,7 @@ import type {
 } from "../apps/api/src/permissions/service.ts"
 import type {
   DashboardEventSummary,
+  DashboardEventWithInvite,
   EventStaffAssignmentSummary,
   EventSummary,
   EventsService,
@@ -358,9 +359,11 @@ test("user without create permission cannot create an event", async () => {
 })
 
 test("dashboard events list includes venue and operated organization context", async () => {
-  const events = createInMemoryEventsService()
-  events.addSeedEvent("demo-karaoke", "active")
-  const app = await createTestApp({ events })
+  const db = fakeDbForDashboardEventList()
+  const app = await createTestApp({
+    events: createEventsService(db.db),
+    permissions: fakePermissions({ platform: new Set(["platform.manage_venues"]) })
+  })
   try {
     const response = await app.inject({ method: "GET", url: "/dashboard/events" })
     const body = response.json()
@@ -377,7 +380,88 @@ test("dashboard events list includes venue and operated organization context", a
       name: "Poza Nuta Demo",
       slug: "poza-nuta-demo"
     })
-    assert.equal(body.events[0].invite.urlPath, `/invite/${body.events[0].invite.code}`)
+    assert.equal("invite" in body.events[0], false)
+    assert.equal(response.body.includes("invite-must-not-leak"), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("dashboard event invite read requires event manage and returns the absolute public URL", async () => {
+  const events = createInMemoryEventsService()
+  const event = events.addSeedEvent("managed-invite", "active")
+  const app = await createTestApp({
+    events,
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/dashboard/events/${event.id}/invite` })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json(), {
+      invite: {
+        code: "invite-managed-invite",
+        status: "active",
+        expiresAt: null,
+        inviteUrl: "http://localhost:3000/invite/invite-managed-invite",
+        urlPath: "/invite/invite-managed-invite"
+      }
+    })
+  } finally {
+    await app.close()
+  }
+})
+
+test("dashboard event invite read returns null without creating a replacement", async () => {
+  const events = createInMemoryEventsService()
+  const event = events.addSeedEvent("revoked-invite", "active")
+  events.state.invites.delete(event.id)
+  const app = await createTestApp({
+    events,
+    permissions: fakePermissions({ event: new Set(["event.manage"]) })
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/dashboard/events/${event.id}/invite` })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json(), { invite: null })
+    assert.equal(events.state.invites.has(event.id), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test("platform owner invite read uses the existing event manage support override", async () => {
+  const events = createInMemoryEventsService()
+  const event = events.addSeedEvent("support-invite", "active")
+  const supportAccessAudit: PlatformOwnerEventSupportAccessAuditInput[] = []
+  const app = await createTestApp({
+    events,
+    permissions: fakePermissions({ platformOwner: true, supportAccessAudit })
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/dashboard/events/${event.id}/invite` })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(supportAccessAudit.map((entry) => entry.operation), ["dashboard.event.manage"])
+  } finally {
+    await app.close()
+  }
+})
+
+test("dashboard event invite read does not expose the bearer code to view-only users", async () => {
+  const events = createInMemoryEventsService()
+  const event = events.addSeedEvent("private-invite", "active")
+  const app = await createTestApp({
+    events,
+    permissions: fakePermissions({ event: new Set(["event.view_stats"]) })
+  })
+  try {
+    const response = await app.inject({ method: "GET", url: `/dashboard/events/${event.id}/invite` })
+
+    assert.equal(response.statusCode, 403)
+    assert.equal(response.json().error.code, "FORBIDDEN")
+    assert.equal(response.body.includes("invite-private-invite"), false)
   } finally {
     await app.close()
   }
@@ -881,7 +965,19 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
     },
     async getDashboardById(eventId) {
       const event = state.events.get(eventId)
-      return event ? toDashboardEvent(event) : null
+      return event ? toDashboardEventWithInvite(event) : null
+    },
+    async getActiveEventInvite(eventId) {
+      requiredEvent(state, eventId)
+      const code = state.invites.get(eventId)
+      return code
+        ? {
+            code,
+            status: "active",
+            expiresAt: null,
+            urlPath: `/invite/${code}`
+          }
+        : null
     },
     async createEvent(input) {
       if (!state.organizationHasAccess) {
@@ -1049,6 +1145,8 @@ function createInMemoryEventsService(options: { organizationHasAccess?: boolean;
       return {
         invite: {
           code,
+          status: "active",
+          expiresAt: null,
           urlPath: `/invite/${code}`
         }
       }
@@ -1097,9 +1195,17 @@ function toDashboardEvent(event: EventSummary): DashboardEventSummary {
       id: ORG_ID,
       name: "Poza Nuta Demo",
       slug: "poza-nuta-demo"
-    },
+    }
+  }
+}
+
+function toDashboardEventWithInvite(event: EventSummary): DashboardEventWithInvite {
+  return {
+    ...toDashboardEvent(event),
     invite: {
       code: `invite-${event.slug}`,
+      status: "active",
+      expiresAt: null,
       urlPath: `/invite/invite-${event.slug}`
     }
   }
@@ -1406,6 +1512,28 @@ function fakeDbForPublicActiveEventLookup(options: {
 
         return queryChain([])
       }
+    } as unknown as DbResources["db"],
+    pool: {
+      end: async () => undefined
+    } as unknown as DbResources["pool"]
+  }
+}
+
+function fakeDbForDashboardEventList(): DbResources {
+  const event = makeEvent(EVENT_ID, "demo-karaoke", "active")
+  return {
+    db: {
+      select: () =>
+        discoveryQueryChain([
+          {
+            ...event,
+            venueName: "Demo Klub",
+            venueSlug: "demo-klub",
+            organizationName: "Poza Nuta Demo",
+            organizationSlug: "poza-nuta-demo",
+            inviteCode: "invite-must-not-leak"
+          }
+        ])
     } as unknown as DbResources["db"],
     pool: {
       end: async () => undefined
