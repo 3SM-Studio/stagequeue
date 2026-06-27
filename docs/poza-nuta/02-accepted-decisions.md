@@ -20,11 +20,11 @@ Public URLs are venue based.
 
 ## ADR-003 — Next.js for public and dashboard apps
 
-Use Next.js for `apps/public-web` and `apps/dashboard-web`. Existing Vite app is legacy/reference.
+Use Next.js for `apps/public-web` and `apps/dashboard-web`. The former Vite prototype has been retired.
 
 ## ADR-004 — Fastify API
 
-Use Fastify for `apps/api`. Do not endlessly patch the prototype `node:http` API into final backend.
+Use Fastify for `apps/api`. The prototype `node:http` API has been retired.
 
 ## ADR-005 — PostgreSQL and Drizzle
 

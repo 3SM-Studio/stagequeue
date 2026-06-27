@@ -37,6 +37,33 @@ test("Fastify unknown route returns a consistent 404 error", async () => {
   }
 })
 
+test("Fastify production error responses hide stack traces and internal messages", async () => {
+  const app = await createApiApp({
+    auth: fakeAuth(),
+    config: testConfig({ nodeEnv: "production" }),
+    db: fakeDbResources(),
+    logger: false
+  })
+  app.get("/test/internal-error", async () => {
+    throw new Error("private failure detail")
+  })
+
+  try {
+    const response = await app.inject({ method: "GET", url: "/test/internal-error" })
+    const body = response.json()
+    const serializedBody = JSON.stringify(body)
+
+    assert.equal(response.statusCode, 500)
+    assert.equal(body.error.code, "INTERNAL_SERVER_ERROR")
+    assert.equal(body.error.message, "Internal server error")
+    assert.equal(body.error.requestId, response.headers["x-request-id"])
+    assert.equal(serializedBody.includes("private failure detail"), false)
+    assert.doesNotMatch(serializedBody, /stack|at /i)
+  } finally {
+    await app.close()
+  }
+})
+
 test("Fastify CORS uses an allowlist and does not combine wildcard origin with credentials", async () => {
   const app = await createTestApp()
   try {

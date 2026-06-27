@@ -154,7 +154,7 @@ Uzyj `12-live-karaoke-manual-qa-playbook.md` jako pelnego scenariusza. Minimalny
 - Redis/cache state is not the source of truth. Losing Redis state can degrade realtime fanout and rate-limit continuity, but Postgres remains the durable queue/event source.
 - After rollback, rerun `/health`, public submit smoke, operator queue smoke and log review before declaring recovery complete.
 
-## Docs Cleanup Candidates
+## Historical Documentation
 
-- README still contains some historical/legacy wording. Do not clean it up during beta release unless it blocks operator understanding.
-- Older archive docs may mention pre-C17 limitations; treat current runbooks and accepted decisions as source of truth.
+- Older archive docs may mention retired runtimes or pre-C17 limitations; treat current runbooks and accepted
+  decisions as source of truth.

@@ -16,8 +16,9 @@ Use Fastify for `apps/api`. Deploy it as a long-running Node.js process on Railw
 
 Positive: the API has a clear home for auth, permissions, organizations, venues, events, queue operations, catalog imports, SSE, jobs, and audit logs.
 
-Negative: the current `node:http` API must be replaced, not endlessly patched into the final backend.
+Negative: the prototype `node:http` API required retirement after Fastify reached equivalent production coverage.
 
 ## Notes for implementation
 
-The existing `apps/api/src/server.ts` can remain as legacy reference until the Fastify skeleton is introduced. Do not move main business logic into Next.js route handlers.
+The former `apps/api/src/server.ts` prototype has been removed. `apps/api/src/index.ts` is the only API runtime
+entrypoint. Do not move main business logic into Next.js route handlers.
