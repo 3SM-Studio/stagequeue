@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   getMyRequestsByEventPublicId,
@@ -72,6 +73,11 @@ export function PublicEventParticipantView({
           <h1>{state.title}</h1>
           <p className="lead">Sprawdz status wydarzenia karaoke, dostepnosc zgloszen i publiczna kolejke.</p>
           <div className="actions">
+            {state.showQueueLink ? (
+              <Link className="button primary" href={`/event/${eventPublicId}/queue`}>
+                Kolejka wydarzenia
+              </Link>
+            ) : null}
             <button className="button secondary" disabled={refreshing} type="button" onClick={() => void refresh()}>
               {refreshing ? "Odswiezanie..." : "Odswiez"}
             </button>

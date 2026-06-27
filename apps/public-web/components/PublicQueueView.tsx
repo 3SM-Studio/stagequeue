@@ -88,7 +88,7 @@ export function PublicQueueView(props: PublicQueueViewProps) {
         <div className="queue-header">
           <div>
             <p className="eyebrow">Teraz</p>
-            <h1>{queue.now ? queue.now.singerName : "Nikt aktualnie nie śpiewa"}</h1>
+            <h2>{queue.now ? queue.now.singerName : "Nikt aktualnie nie śpiewa"}</h2>
           </div>
           <span className={`stream-pill ${status}`}>{statusLabel(status)}</span>
         </div>
