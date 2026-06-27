@@ -137,6 +137,22 @@ Praktyczna kontrola w devtools:
 - POST/PATCH akcji operatora nie powinien wisiec na `Provisional headers`;
 - po bledzie sieci przyciski operatora powinny sie odblokowac.
 
+### C20f staging evidence
+
+- [ ] Operator otwiera `/dashboard/events/<eventId>/queue`.
+- [ ] Telefon A skanuje `/invite/<inviteCode>`, wraca na `/event/<eventPublicId>` i wysyla piosenke.
+- [ ] Pending request pojawia sie w operator queue bez recznego odswiezenia.
+- [ ] Telefon B ma otwarte `/event/<eventPublicId>/queue`.
+- [ ] Operator wykonuje approve, start, done i move/reorder.
+- [ ] Telefon B widzi zatwierdzenie, kolejnosc i zmiany `now` bez recznego odswiezenia.
+- [ ] Po rozlaczeniu i przywroceniu sieci telefonu B EventSource laczy sie ponownie i refetchuje snapshot.
+- [ ] DevTools pokazuje jedna EventSource per page.
+- [ ] Publiczne domain-update SSE `data` zawiera tylko `type` i `at`, bez internal event/venue/request/organization IDs.
+- [ ] Heartbeat `: ping` utrzymuje polaczenie przez timeout proxy.
+- [ ] Staging proxy Railway/Render nie buforuje SSE.
+- [ ] Przy wiecej niz jednej instancji API event przechodzi miedzy instancjami przez Redis Pub/Sub.
+- [ ] Zapisano date, release SHA, przegladarki/urzadzenia, wykonawce QA i wynik kazdego punktu; brak evidence oznacza `NOT RUN`.
+
 ## 7. Public Queue Visibility
 
 - [ ] Otworz `/event/<eventPublicId>/queue` z linku `Kolejka wydarzenia` na canonical event page.

@@ -1,6 +1,9 @@
 import type { FastifyInstance, FastifyReply } from "fastify"
+import type { DomainEventPayload } from "../../plugins/eventBus.ts"
 
 const KEEPALIVE_INTERVAL_MS = 20_000
+
+export type PublicStreamEventPayload = Pick<DomainEventPayload, "type" | "at">
 
 export function startEventStream(
   app: FastifyInstance,
@@ -8,6 +11,8 @@ export function startEventStream(
   options: {
     channel: string
     connected: Record<string, unknown>
+    heartbeatIntervalMs?: number
+    mapEventData?: (event: DomainEventPayload) => unknown
   }
 ): FastifyReply {
   const startedAt = Date.now()
@@ -31,12 +36,15 @@ export function startEventStream(
   })
 
   const unsubscribe = app.eventBus.subscribe(options.channel, (event) => {
-    app.writeSse(reply, { event: event.type, data: event })
+    app.writeSse(reply, {
+      event: event.type,
+      data: options.mapEventData?.(event) ?? event
+    })
   })
 
   const keepalive = setInterval(() => {
     reply.raw.write(": ping\n\n")
-  }, KEEPALIVE_INTERVAL_MS)
+  }, options.heartbeatIntervalMs ?? KEEPALIVE_INTERVAL_MS)
   keepalive.unref()
 
   reply.raw.on("error", (error) => {
@@ -66,6 +74,13 @@ export function startEventStream(
   })
 
   return reply
+}
+
+export function toPublicStreamEventPayload(event: DomainEventPayload): PublicStreamEventPayload {
+  return {
+    type: event.type,
+    at: event.at
+  }
 }
 
 function createStreamLogContext(reply: FastifyReply, connected: Record<string, unknown>): Record<string, unknown> {

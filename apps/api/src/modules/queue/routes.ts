@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import { ApiHttpError } from "../../errors.ts"
 import { requireActiveCurrentUser } from "../../permissions/request.ts"
-import { startEventStream } from "../streams/eventStreams.ts"
+import { startEventStream, toPublicStreamEventPayload } from "../streams/eventStreams.ts"
 import { PARTICIPANT_COOKIE_NAME, hashParticipantToken, isValidParticipantToken, resolveParticipantToken } from "./participant.ts"
 import { type QueueSongRequest, type SubmitPublicRequestInput } from "./service.ts"
 import {
@@ -21,7 +21,8 @@ export async function registerQueuePublicRoutes(app: FastifyInstance): Promise<v
 
     return startEventStream(app, reply, {
       channel: app.eventBus.eventChannel(activeEvent.id),
-      connected: { scope: "public.venue", venueSlug, eventId: activeEvent.id }
+      connected: { scope: "public.venue", venueSlug },
+      mapEventData: toPublicStreamEventPayload
     })
   })
 
@@ -110,7 +111,8 @@ export async function registerQueuePublicRoutes(app: FastifyInstance): Promise<v
 
     return startEventStream(app, reply, {
       channel: app.eventBus.eventChannel(event.id),
-      connected: { scope: "public.event", eventPublicId: event.publicId }
+      connected: { scope: "public.event", eventPublicId: event.publicId },
+      mapEventData: toPublicStreamEventPayload
     })
   })
 

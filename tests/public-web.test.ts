@@ -45,6 +45,10 @@ import {
   getVenuePageData
 } from "../apps/public-web/lib/pageData.ts"
 import { getPublicEventPageState } from "../apps/public-web/lib/publicEventPageState.ts"
+import {
+  createPublicQueueStream,
+  type PublicQueueEventSource
+} from "../apps/public-web/lib/publicQueueStream.ts"
 import { shouldRefetchQueue } from "../apps/public-web/lib/queueRefresh.ts"
 import { createRefetchScheduler as createPublicRefetchScheduler } from "../apps/public-web/lib/refetchScheduler.ts"
 import {
@@ -741,6 +745,59 @@ test("public-web queue refetch helper reacts to queue.updated", () => {
   assert.equal(shouldRefetchQueue("connected"), false)
 })
 
+test("public queue stream uses one event source and refetches after events and reconnect open", () => {
+  const source = new FakePublicQueueEventSource()
+  const statuses: string[] = []
+  const eventTypes: string[] = []
+  let factoryCalls = 0
+  let refetchCount = 0
+  let requestedUrl = ""
+  let withCredentials = false
+
+  const stream = createPublicQueueStream({
+    eventSourceFactory: (url, init) => {
+      factoryCalls += 1
+      requestedUrl = url
+      withCredentials = init.withCredentials
+      return source
+    },
+    onEvent: (eventType) => eventTypes.push(eventType),
+    onRefetch: () => {
+      refetchCount += 1
+    },
+    onStatusChange: (status) => statuses.push(status),
+    streamUrl: "http://localhost:4321/public/events/ka2Md-d1das/stream"
+  })
+
+  source.open()
+  source.emit("request.approved")
+  source.open()
+
+  assert.equal(factoryCalls, 1)
+  assert.equal(requestedUrl, "http://localhost:4321/public/events/ka2Md-d1das/stream")
+  assert.equal(withCredentials, true)
+  assert.equal(refetchCount, 3)
+  assert.deepEqual(eventTypes, ["request.approved"])
+  assert.deepEqual(statuses, ["connecting", "connected", "connected"])
+
+  stream.close()
+  assert.equal(source.closeCalls, 1)
+  assert.equal(statuses.at(-1), "stale")
+})
+
+test("canonical public queue component uses event stream lifecycle and visibility fallback", () => {
+  const source = readFileSync("apps/public-web/components/PublicQueueView.tsx", "utf8")
+  const eventPageSource = readFileSync("apps/public-web/components/PublicEventParticipantView.tsx", "utf8")
+
+  assert.match(source, /buildPublicEventStreamUrl\(eventPublicId\)/)
+  assert.match(source, /createPublicQueueStream/)
+  assert.match(source, /eventType\.startsWith\("event\."\)/)
+  assert.match(source, /window\.addEventListener\("focus"/)
+  assert.match(source, /document\.addEventListener\("visibilitychange"/)
+  assert.doesNotMatch(source, /buildPublicVenueStreamUrl|venueSlug/)
+  assert.match(eventPageSource, /onLifecycleEvent=\{refresh\}/)
+})
+
 test("public-web join refetch helper reacts to lifecycle and queue events", () => {
   for (const eventType of [
     "event.started",
@@ -1356,5 +1413,32 @@ function withApiEnv(env: { API_INTERNAL_URL?: string | undefined; NEXT_PUBLIC_AP
   } finally {
     restoreEnv("API_INTERNAL_URL", previousInternal)
     restoreEnv("NEXT_PUBLIC_API_URL", previousPublic)
+  }
+}
+
+class FakePublicQueueEventSource implements PublicQueueEventSource {
+  closeCalls = 0
+  listeners = new Map<string, Array<(event: MessageEvent) => void>>()
+  onerror: ((event: Event) => void) | null = null
+  onopen: ((event: Event) => void) | null = null
+
+  addEventListener(type: string, listener: (event: MessageEvent) => void): void {
+    const listeners = this.listeners.get(type) ?? []
+    listeners.push(listener)
+    this.listeners.set(type, listeners)
+  }
+
+  close(): void {
+    this.closeCalls += 1
+  }
+
+  emit(type: string): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(new MessageEvent(type))
+    }
+  }
+
+  open(): void {
+    this.onopen?.(new Event("open"))
   }
 }

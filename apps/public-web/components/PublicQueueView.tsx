@@ -1,86 +1,77 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import {
-  buildPublicEventStreamUrl,
-  buildPublicVenueStreamUrl,
-  getPublicQueue,
-  getPublicQueueByVenueSlug,
-  type PublicQueue
-} from "../lib/apiClient"
-import { shouldRefetchQueue } from "../lib/queueRefresh"
+import { buildPublicEventStreamUrl, getPublicQueue, type PublicQueue } from "../lib/apiClient"
+import { createPublicQueueStream, type PublicQueueStreamStatus } from "../lib/publicQueueStream"
 import { createRefetchScheduler } from "../lib/refetchScheduler"
 
-type PublicQueueViewProps =
-  | {
-      eventPublicId: string
-      initialQueue: PublicQueue
-      venueSlug?: never
-    }
-  | {
-      eventPublicId?: never
-      initialQueue: PublicQueue
-      venueSlug: string
-    }
-
-export function PublicQueueView(props: PublicQueueViewProps) {
-  const { initialQueue } = props
-  const scopeKind = props.eventPublicId !== undefined ? "event" : "venue"
-  const eventPublicId = props.eventPublicId ?? ""
-  const venueSlug = props.venueSlug ?? ""
+export function PublicQueueView({
+  eventPublicId,
+  initialQueue,
+  onLifecycleEvent
+}: {
+  eventPublicId: string
+  initialQueue: PublicQueue
+  onLifecycleEvent?: () => void
+}) {
   const [queue, setQueue] = useState(initialQueue)
-  const [status, setStatus] = useState<"connected" | "connecting" | "stale">("connecting")
+  const [status, setStatus] = useState<PublicQueueStreamStatus>("connecting")
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      setQueue(scopeKind === "event" ? await getPublicQueue(eventPublicId) : await getPublicQueueByVenueSlug(venueSlug))
+      setQueue(await getPublicQueue(eventPublicId))
       setError(null)
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Nie udało się odświeżyć kolejki.")
       setStatus("stale")
     }
-  }, [eventPublicId, scopeKind, venueSlug])
+  }, [eventPublicId])
 
   useEffect(() => {
-    const scheduler = createRefetchScheduler(refresh)
-    const source = new EventSource(
-      scopeKind === "event" ? buildPublicEventStreamUrl(eventPublicId) : buildPublicVenueStreamUrl(venueSlug),
-      { withCredentials: true }
-    )
-    source.addEventListener("open", () => setStatus("connected"))
-    source.addEventListener("error", () => setStatus("stale"))
+    setQueue(initialQueue)
+  }, [initialQueue])
 
-    const onMessage = (event: MessageEvent) => {
-      if (shouldRefetchQueue(event.type)) {
-        scheduler.schedule()
+  useEffect(() => {
+    let mounted = true
+    const scheduler = createRefetchScheduler(refresh)
+    const stream = createPublicQueueStream({
+      eventSourceFactory: (url, init) => new EventSource(url, init),
+      onEvent: (eventType) => {
+        if (eventType.startsWith("event.")) {
+          onLifecycleEvent?.()
+        }
+      },
+      onRefetch: scheduler.schedule,
+      onStatusChange: (nextStatus) => {
+        if (mounted) {
+          setStatus(nextStatus)
+        }
+      },
+      streamUrl: buildPublicEventStreamUrl(eventPublicId)
+    })
+
+    return () => {
+      mounted = false
+      scheduler.cancel()
+      stream.close()
+    }
+  }, [eventPublicId, onLifecycleEvent, refresh])
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refresh()
       }
     }
 
-    for (const eventType of [
-      "queue.updated",
-      "request.created",
-      "request.approved",
-      "request.rejected",
-      "request.started",
-      "request.done",
-      "request.skipped",
-      "request.moved",
-      "event.started",
-      "event.paused",
-      "event.resumed",
-      "event.closed",
-      "event.archived",
-      "event.cancelled"
-    ]) {
-      source.addEventListener(eventType, onMessage)
-    }
-
+    window.addEventListener("focus", refreshWhenVisible)
+    document.addEventListener("visibilitychange", refreshWhenVisible)
     return () => {
-      scheduler.cancel()
-      source.close()
+      window.removeEventListener("focus", refreshWhenVisible)
+      document.removeEventListener("visibilitychange", refreshWhenVisible)
     }
-  }, [eventPublicId, scopeKind, refresh, venueSlug])
+  }, [refresh])
 
   return (
     <section className="queue-layout">
@@ -142,7 +133,7 @@ export function PublicQueueView(props: PublicQueueViewProps) {
   )
 }
 
-function statusLabel(status: "connected" | "connecting" | "stale"): string {
+function statusLabel(status: PublicQueueStreamStatus): string {
   if (status === "connected") {
     return "Live"
   }

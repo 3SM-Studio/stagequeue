@@ -283,6 +283,11 @@ Fastify API wybiera EventBus i infrastrukturalny rate limiter na podstawie konfi
 
 SSE pozostaje kanalem best-effort: Redis Pub/Sub rozsyla nowe eventy, ale nie zapewnia replay ani gwarantowanego dostarczenia po rozlaczeniu klienta. Awaria Redis oznacza problemy z live update/SSE fanout; mutacje kolejki dalej wykonuja zwykle HTTP/DB flow i nie powinny zmieniac semantyki przez sam brak realtime. UI powinno dalej traktowac SSE jako niekrytyczne i uzywac istniejacych refetch/polling fallbackow.
 
+Canonical public queue korzysta z `/public/events/:eventPublicId/stream`. Publiczne domain-update frame'y
+zawieraja tylko `type` i `at`, bez internal event/venue/request IDs. Klient refetchuje snapshot po istotnym evencie
+oraz po kazdym EventSource `open`, w tym reconnect; focus/visibility refresh jest lekkim fallbackiem. Dashboard
+operator queue zachowuje chroniony `/dashboard/events/:eventId/stream` i polling fallback co 5 sekund.
+
 Redis-backed rate limiting jest best-effort abuse protection, nie perfekcyjnym systemem quota ani durable counter store. Awaria Redis w production powoduje fail-closed dla chronionego requestu przez kontrolowany blad API; nie ma cichego fallbacku do in-memory w production. Domenowe limity uczestnika, takie jak `PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT` i `PUBLIC_REQUEST_COOLDOWN_SECONDS`, pozostaja osobnymi regulami queue service i nie sa tym samym co infrastrukturalny IP/route rate limiter.
 
 ### Lightweight observability

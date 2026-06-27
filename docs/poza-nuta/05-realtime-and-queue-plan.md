@@ -7,10 +7,13 @@ SSE first. HTTP mutations for actions. Polling only as fallback/prototype. WebSo
 ## Target streams
 
 ```txt
-GET /public/events/:eventPublicId/queue/stream
-GET /dashboard/events/:eventId/queue/stream
-GET /dashboard/imports/:importId/stream
+GET /public/events/:eventPublicId/stream
+GET /dashboard/events/:eventId/stream
+GET /platform/catalog/import-runs/:runId/stream
 ```
+
+The legacy `GET /public/venues/:venueSlug/stream` remains available for compatibility, but canonical public-web
+uses only the event-scoped public stream.
 
 ## HTTP mutations
 
@@ -41,14 +44,33 @@ MUST implement:
 ## Event names
 
 ```txt
-queue.snapshot
 queue.updated
-queue.request.submitted
-queue.request.approved
-queue.request.rejected
-event.status.changed
-heartbeat
+request.created
+request.approved
+request.rejected
+request.started
+request.done
+request.skipped
+request.moved
+event.started
+event.paused
+event.resumed
+event.closed
+event.archived
+event.cancelled
 ```
+
+Public domain-update frames expose only `{ type, at }`; the initial `connected` frame contains only public scope
+context. Internal event, venue, request and organization identifiers stay inside the EventBus and protected
+dashboard stream. Dashboard event streams retain their authenticated internal payload because the operator client
+is authorized for the concrete event.
+
+The public queue client refetches its event-scoped queue snapshot after every relevant frame and after every
+EventSource `open`, including reconnect. Focus and visibility refresh provide a light fallback without aggressive
+polling. The dashboard operator queue keeps its existing five-second visible-page polling fallback.
+
+The server sends a `: ping` heartbeat comment every 20 seconds and unsubscribes from the EventBus when the HTTP
+connection closes. SSE remains best-effort and has no replay; reconnect refetch is the recovery mechanism.
 
 ## Scaling path
 

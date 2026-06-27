@@ -16,6 +16,7 @@ import type {
   PermissionService,
   PlatformOwnerEventSupportAccessAuditInput
 } from "../apps/api/src/permissions/service.ts"
+import { startEventStream } from "../apps/api/src/modules/streams/eventStreams.ts"
 import { ApiHttpError } from "../apps/api/src/errors.ts"
 import type { DbClient } from "@poza-nuta/db"
 
@@ -47,6 +48,121 @@ test("public stream endpoint returns text/event-stream and cleans up subscriber 
     controller.abort()
     await delay(50)
     assert.equal(app.eventBus.subscriberCount(app.eventBus.eventChannel(EVENT_ID)), 0)
+  } finally {
+    controller.abort()
+    await app.close()
+  }
+})
+
+test("public event and legacy venue streams omit internal identifiers from connected and event payloads", async () => {
+  for (const path of [
+    `/public/events/${EVENT_PUBLIC_ID}/stream`,
+    "/public/venues/klub-x/stream"
+  ]) {
+    const app = await createTestApp()
+    await app.listen({ host: "127.0.0.1", port: 0 })
+    const port = (app.server.address() as AddressInfo).port
+    const controller = new AbortController()
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+        headers: { Origin: "http://localhost:3000" },
+        signal: controller.signal
+      })
+      const reader = response.body?.getReader()
+      assert.ok(reader, "Expected SSE response body")
+      const connectedFrame = await readUntilSseMarker(reader, "event: connected")
+
+      app.eventBus.publish({
+        type: "request.created",
+        eventId: EVENT_ID,
+        venueId: VENUE_ID,
+        requestId: REQUEST_ID,
+        at: "2026-06-27T10:00:00.000Z"
+      })
+      const eventFrame = await readUntilSseMarker(reader, "event: request.created")
+      const payload = readSseEventData(eventFrame, "request.created")
+
+      assert.equal(response.status, 200)
+      assert.deepEqual(payload, {
+        type: "request.created",
+        at: "2026-06-27T10:00:00.000Z"
+      })
+      for (const internalValue of [EVENT_ID, VENUE_ID, REQUEST_ID]) {
+        assert.equal(connectedFrame.includes(internalValue), false)
+        assert.equal(eventFrame.includes(internalValue), false)
+      }
+      assert.equal("eventId" in payload, false)
+      assert.equal("venueId" in payload, false)
+      assert.equal("requestId" in payload, false)
+      assert.equal("organizationId" in payload, false)
+    } finally {
+      controller.abort()
+      await app.close()
+    }
+  }
+})
+
+test("dashboard stream keeps its authenticated internal event payload", async () => {
+  const app = await createTestApp()
+  await app.listen({ host: "127.0.0.1", port: 0 })
+  const port = (app.server.address() as AddressInfo).port
+  const controller = new AbortController()
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/dashboard/events/${EVENT_ID}/stream`, {
+      headers: { Origin: "http://localhost:3001" },
+      signal: controller.signal
+    })
+    const reader = response.body?.getReader()
+    assert.ok(reader, "Expected SSE response body")
+    await readUntilSseMarker(reader, "event: connected")
+
+    app.eventBus.publish({
+      type: "request.moved",
+      eventId: EVENT_ID,
+      venueId: VENUE_ID,
+      requestId: REQUEST_ID,
+      at: "2026-06-27T10:01:00.000Z"
+    })
+    const eventFrame = await readUntilSseMarker(reader, "event: request.moved")
+
+    assert.deepEqual(readSseEventData(eventFrame, "request.moved"), {
+      type: "request.moved",
+      eventId: EVENT_ID,
+      venueId: VENUE_ID,
+      requestId: REQUEST_ID,
+      at: "2026-06-27T10:01:00.000Z"
+    })
+  } finally {
+    controller.abort()
+    await app.close()
+  }
+})
+
+test("event stream writes heartbeat comments and cleans up after disconnect", async () => {
+  const app = await createTestApp()
+  const channel = app.eventBus.eventChannel(EVENT_ID)
+  app.get("/test/sse-heartbeat", async (_request, reply) =>
+    startEventStream(app, reply, {
+      channel,
+      connected: { scope: "test.heartbeat" },
+      heartbeatIntervalMs: 5
+    })
+  )
+  await app.listen({ host: "127.0.0.1", port: 0 })
+  const port = (app.server.address() as AddressInfo).port
+  const controller = new AbortController()
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/test/sse-heartbeat`, {
+      signal: controller.signal
+    })
+    const reader = response.body?.getReader()
+    assert.ok(reader, "Expected SSE response body")
+
+    assert.match(await readUntilSseMarker(reader, ": ping"), /: ping\n\n/)
+    assert.equal(app.eventBus.subscriberCount(channel), 1)
+
+    controller.abort()
+    await waitFor(() => app.eventBus.subscriberCount(channel) === 0)
   } finally {
     controller.abort()
     await app.close()
@@ -438,18 +554,67 @@ test("queue service publishes request event and queue.updated without private no
   assert.equal("note" in received[0], false)
 })
 
-test("event lifecycle publishes lifecycle event and queue.updated", async () => {
-  const bus = createInMemoryDomainEventBus()
-  const received: DomainEventPayload[] = []
-  bus.subscribeToEvent(EVENT_ID, (event) => received.push(event))
+test("request submit queue move and lifecycle change reach the public SSE stream", async () => {
+  const eventBus = createInMemoryDomainEventBus()
+  const app = await createTestApp({ eventBus })
+  await app.listen({ host: "127.0.0.1", port: 0 })
+  const port = (app.server.address() as AddressInfo).port
+  const controller = new AbortController()
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/public/events/${EVENT_PUBLIC_ID}/stream`, {
+      headers: { Origin: "http://localhost:3000" },
+      signal: controller.signal
+    })
+    const reader = response.body?.getReader()
+    assert.ok(reader, "Expected SSE response body")
+    await readUntilSseMarker(reader, "event: connected")
 
-  const events = createEventsService(fakeDbForLifecycleStart(), bus)
-  await events.changeLifecycle(EVENT_ID, "start", USER_ID)
+    const submitQueue = createQueueService(fakeDbForSubmit(), eventBus, {
+      maxActivePerParticipant: 3,
+      cooldownSeconds: 20
+    })
+    await submitQueue.submitPublicRequest(EVENT_ID, {
+      singerName: "Michał",
+      participantTokenHash: "participant-token-hash",
+      sourceId: "ising",
+      sourceTrackId: "9053",
+      songTitle: "Królowa Łez",
+      songArtist: "Agnieszka Chylińska"
+    })
+    assert.match(await readUntilSseMarker(reader, "event: request.created"), /event: request\.created/)
 
-  assert.deepEqual(
-    received.map((event) => event.type),
-    ["event.started", "queue.updated"]
-  )
+    const moveQueue = createQueueService(fakeDbForMove(), eventBus)
+    await moveQueue.moveRequest(EVENT_ID, REQUEST_ID, 2, USER_ID)
+    assert.match(await readUntilSseMarker(reader, "event: request.moved"), /event: request\.moved/)
+
+    const events = createEventsService(fakeDbForLifecycle("active", "paused"), eventBus)
+    await events.changeLifecycle(EVENT_ID, "pause", USER_ID)
+    assert.match(await readUntilSseMarker(reader, "event: event.paused"), /event: event\.paused/)
+  } finally {
+    controller.abort()
+    await app.close()
+  }
+})
+
+test("event lifecycle changes publish lifecycle and queue update events", async () => {
+  for (const scenario of [
+    { action: "start", from: "scheduled", to: "active", eventType: "event.started" },
+    { action: "pause", from: "active", to: "paused", eventType: "event.paused" },
+    { action: "resume", from: "paused", to: "active", eventType: "event.resumed" },
+    { action: "close", from: "active", to: "closed", eventType: "event.closed" }
+  ] as const) {
+    const bus = createInMemoryDomainEventBus()
+    const received: DomainEventPayload[] = []
+    bus.subscribeToEvent(EVENT_ID, (event) => received.push(event))
+    const events = createEventsService(fakeDbForLifecycle(scenario.from, scenario.to), bus)
+
+    await events.changeLifecycle(EVENT_ID, scenario.action, USER_ID)
+
+    assert.deepEqual(
+      received.map((event) => event.type),
+      [scenario.eventType, "queue.updated"]
+    )
+  }
 })
 
 test("platform catalog import stream requires platform catalog permission", async () => {
@@ -534,9 +699,80 @@ function fakeDbForApprove(): DbClient {
   } as unknown as DbClient
 }
 
-function fakeDbForLifecycleStart(): DbClient {
-  const event = makeEvent("scheduled")
-  const updated = makeEvent("active")
+function fakeDbForSubmit(): DbClient {
+  const request = {
+    ...makeRequest("pending"),
+    participantTokenHash: "participant-token-hash"
+  }
+  let selectCount = 0
+  let insertCount = 0
+  return {
+    execute: async () => [],
+    select: () => {
+      selectCount += 1
+      if (selectCount === 1) {
+        return queryChain([eventContext()])
+      }
+      if (selectCount === 2) {
+        return queryChain([{ id: "ising" }])
+      }
+      return queryChain([])
+    },
+    insert: () => ({
+      values: () => {
+        insertCount += 1
+        return insertCount === 1
+          ? {
+              returning: () => [request]
+            }
+          : undefined
+      }
+    })
+  } as unknown as DbClient
+}
+
+function fakeDbForMove(): DbClient {
+  const request = { ...makeRequest("approved"), position: 1 }
+  const nextRequest = {
+    ...makeRequest("approved"),
+    id: "77777777-7777-4777-8777-777777777777",
+    position: 2
+  }
+  let selectCount = 0
+  return {
+    execute: async () => [],
+    select: () => {
+      selectCount += 1
+      if (selectCount === 1) {
+        return queryChain([eventContext()])
+      }
+      if (selectCount === 2 || selectCount === 4) {
+        return queryChain([request])
+      }
+      if (selectCount === 3) {
+        return queryChain([request, nextRequest])
+      }
+      return queryChain([])
+    },
+    update: () => ({
+      set: (values: Partial<QueueSongRequest>) => ({
+        where: () => ({
+          returning: () => {
+            Object.assign(request, values)
+            return [request]
+          }
+        })
+      })
+    }),
+    insert: () => ({
+      values: () => undefined
+    })
+  } as unknown as DbClient
+}
+
+function fakeDbForLifecycle(from: string, to: string): DbClient {
+  const event = makeEvent(from)
+  const updated = makeEvent(to)
   let selectCount = 0
   return {
     select: () => {
@@ -580,10 +816,12 @@ function eventContext() {
   return {
     event: {
       id: EVENT_ID,
+      publicId: EVENT_PUBLIC_ID,
       venueId: VENUE_ID,
       operatedByOrganizationId: ORG_ID,
       name: "SSE Event",
       status: "active",
+      visibility: "public",
       publicJoinEnabled: true,
       publicQueueEnabled: true,
       joinAccessMode: "open"
@@ -821,6 +1059,62 @@ async function readFirstChunk(response: Response): Promise<string> {
   const chunk = await reader.read()
   assert.equal(chunk.done, false)
   return new TextDecoder().decode(chunk.value)
+}
+
+async function readUntilSseMarker(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  marker: string
+): Promise<string> {
+  const decoder = new TextDecoder()
+  let content = ""
+  const timeoutAt = Date.now() + 1_000
+
+  while (!content.includes(marker)) {
+    if (Date.now() >= timeoutAt) {
+      throw new Error(`Timed out waiting for SSE marker: ${marker}`)
+    }
+    const remainingMs = timeoutAt - Date.now()
+    const chunk = await readStreamChunk(reader, remainingMs, marker)
+    if (chunk.done) {
+      throw new Error(`SSE stream ended before marker: ${marker}`)
+    }
+    content += decoder.decode(chunk.value, { stream: true })
+  }
+
+  return content
+}
+
+async function readStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+  marker: string
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(`Timed out waiting for SSE marker: ${marker}`)), timeoutMs)
+      })
+    ])
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+function readSseEventData(content: string, eventName: string): Record<string, unknown> {
+  const frame = content
+    .split("\n\n")
+    .find((candidate) => candidate.split("\n").includes(`event: ${eventName}`))
+  assert.ok(frame, `Expected SSE event frame: ${eventName}`)
+  const data = frame
+    .split("\n")
+    .filter((line) => line.startsWith("data: "))
+    .map((line) => line.slice("data: ".length))
+    .join("\n")
+  return JSON.parse(data) as Record<string, unknown>
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {

@@ -1385,11 +1385,13 @@ test("dashboard-web stream URL builder uses dashboard event stream endpoint", ()
 
 test("dashboard-web operator queue stream opens one event stream with credentials", () => {
   const statuses: string[] = []
+  let factoryCalls = 0
   let requestedUrl = ""
   let requestedCredentials = false
 
   const stream = createOperatorQueueStream({
     eventSourceFactory: (url, init) => {
+      factoryCalls += 1
       requestedUrl = url
       requestedCredentials = init.withCredentials
       return new FakeDashboardEventSource()
@@ -1399,6 +1401,7 @@ test("dashboard-web operator queue stream opens one event stream with credential
     streamUrl: "http://localhost:4321/dashboard/events/event-1/stream"
   })
 
+  assert.equal(factoryCalls, 1)
   assert.equal(requestedUrl, "http://localhost:4321/dashboard/events/event-1/stream")
   assert.equal(requestedCredentials, true)
   assert.deepEqual(statuses, ["connecting"])
