@@ -48,9 +48,12 @@ requestow. Nie tworzy prawdziwych userow auth ani sekretow.
 
 Adresy do QA:
 
-- `http://localhost:3000/demo-klub`
-- `http://localhost:3000/demo-klub/join`
-- `http://localhost:3000/demo-klub/queue`
+- `http://localhost:3000/` - public discovery,
+- `http://localhost:3000/event/<eventPublicId>` - canonical event detail, submit i kolejka,
+- `http://localhost:3000/demo-klub` - tymczasowy read-only profil lokalu.
+
+`eventPublicId` odczytasz z kolumny `events.public_id`. Legacy URL-e `/demo-klub/join` i `/demo-klub/queue`
+zwracaja 404.
 
 ## Source package do audytu
 
@@ -488,37 +491,43 @@ NEXT_PUBLIC_API_URL=http://localhost:4321
 
 `NEXT_PUBLIC_API_URL` jest uzywany przez browser/client components, w tym submit formularza i SSE `EventSource`. Ten URL musi byc osiagalny z przegladarki uzytkownika. Lokalny fallback to `http://localhost:4321`.
 
-MVP public-web uzywa venue-first active event flow:
+Public-web uzywa event-first participant flow:
 
-- `/` - strona startowa,
-- `/[venueSlug]` - publiczny profil lokalu i linki do aktywnego flow,
-- `/[venueSlug]/join` - formularz zgloszenia dla aktywnego eventu,
-- `/[venueSlug]/queue` - publiczna kolejka z live odswiezaniem przez SSE.
+- `/` - public discovery,
+- `/event/[eventPublicId]` - canonical event detail, submit i public queue wedlug event access policy,
+- `/invite/[inviteCode]` - claim invite i redirect do canonical event page,
+- `/[venueSlug]` - tymczasowy read-only profil lokalu; aktywny event linkuje do `/event/[eventPublicId]`.
 
-Zarezerwowane placeholdery pod przyszly event-specific routing:
+Usuniete venue-scoped participant routes zwracaja 404 i nie redirectuja przez active-event lookup:
 
+- `/[venueSlug]/join`,
+- `/[venueSlug]/queue`,
 - `/[venueSlug]/events/[eventSlug]`,
 - `/[venueSlug]/events/[eventSlug]/join`,
-- `/[venueSlug]/events/[eventSlug]/queue`,
-- `/org/[organizationSlug]` - placeholder publicznego profilu organizacji.
+- `/[venueSlug]/events/[eventSlug]/queue`.
 
-Event-slug routes nie sa jeszcze pelnym publicznym flow i nie powinny byc opisywane ani traktowane jako gotowa funkcja. Aktualny MVP jest venue-first: podstawowy join/queue flow nie wymaga znajomosci event UUID po stronie public-web.
+`/event/[eventPublicId]/queue` jest docelowym osobnym URL-em kolejki, ale nie istnieje jeszcze. Obecnie kolejka
+jest renderowana na `/event/[eventPublicId]`. Public profile routing `/@handle` albo `/venue/[venuePublicId]`
+pozostaje osobnym zadaniem.
 
 Preferowane endpointy publiczne dla uczestnika:
 
 ```txt
-GET  /public/venues/:venueSlug/queue
-POST /public/venues/:venueSlug/requests
-GET  /public/venues/:venueSlug/stream
+GET  /public/events/:eventPublicId
+GET  /public/events/:eventPublicId/queue
+POST /public/events/:eventPublicId/requests
+GET  /public/events/:eventPublicId/my-requests
+GET  /public/events/:eventPublicId/stream
 ```
 
-Event-based endpointy `GET/POST /public/events/:eventPublicId/*` zostaja tymczasowo jako low-level/event-specific compatibility API, ale public-web uzywa venue-first endpointow dla queue snapshotu, submitu i SSE.
+Venue-based public API pozostaje tymczasowo jako compatibility surface, ale public-web nie linkuje juz do
+venue-scoped join ani queue.
 
 Public submit uzywa anonimowego cookie `pn_participant`. Uczestnik nie zaklada konta, token nie trafia do response body, a baza zapisuje tylko hash w `song_requests.participant_token_hash`. `PARTICIPANT_TOKEN_SECRET` sluzy do HMAC-SHA-256; jesli nie jest ustawiony, API uzywa `AUTH_SECRET` jako fallback. Dodatkowe limity antyspamowe: maksymalnie `PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT` aktywne requesty (`pending`, `approved`, `now`) per event oraz cooldown `PUBLIC_REQUEST_COOLDOWN_SECONDS` sekund per participant/event. Dotychczasowy IP+event rate limit zostaje jako fallback.
 
-`/[venueSlug]/join` nadal moze sprawdzic `GET /public/venues/:venueSlug/active-event` do UX/inactive state, ale wysyla request przez `POST /public/venues/:venueSlug/requests`. Jesli nie ma aktywnego eventu, pokazuje inactive state; jesli event jest paused, blokuje zgloszenia i pokazuje stan wstrzymania.
-
-`/[venueSlug]/queue` pobiera queue przez `GET /public/venues/:venueSlug/queue` i laczy sie z `GET /public/venues/:venueSlug/stream`. Dla lokalu bez active/paused eventu API zwraca stabilny inactive shape z `activeEvent: null`, pusta kolejka i `submissions.enabled=false`. Po eventach `queue.updated`, `request.*` albo `event.*` frontend odswieza snapshot z API. API pozostaje source of truth; frontend nie utrzymuje wlasnej kolejki. Join i queue maja `noindex`.
+`/event/[eventPublicId]` pobiera event detail, queue i requesty uczestnika przez event-scoped API. Backend pozostaje
+source of truth dla visibility, lifecycle, `publicJoinEnabled`, `publicQueueEnabled`, `joinAccessMode` i
+`participant_event_access`.
 
 ## Dashboard-web MVP foundation
 
@@ -616,13 +625,14 @@ POST  /dashboard/events/:eventId/cancel
 
 Panel pozwala tez wlaczyc albo wylaczyc `publicJoinEnabled` i `publicQueueEnabled`. Public submit jest traktowany jako dostepny tylko dla eventu `active` z wlaczonym public join; public queue w dashboardowym modelu widocznosci jest traktowana jako live dla `active` albo `paused` z wlaczonym public queue. Backend i public API pozostaja zrodlem prawdy.
 
-D4.1 domyka lifecycle realtime coverage dla public join. Publiczny join page `/[venueSlug]/join` laczy sie z `GET /public/venues/:venueSlug/stream` i po `event.started`, `event.paused`, `event.resumed`, `event.closed`, `event.archived`, `event.cancelled` oraz `queue.updated` odswieza active-event state. Dzieki temu pauza/wznowienie blokuje albo przywraca formularz bez F5.
+D4.1 historycznie dodalo lifecycle realtime dla venue-first join. Ten URL zostal usuniety; canonical participant flow
+dziala teraz na `/event/[eventPublicId]` i korzysta z event-scoped API.
 
-D4.2/P0 utwardza lifecycle controls przed connection starvation i wiszacymi fetchami. Strona operator queue nie otwiera juz dashboard SSE jako krytycznego kanalu; lifecycle action wykonuje POST/PATCH z timeoutem, po sukcesie robi deterministyczny refetch event detail + operator queue, a przy bledzie zawsze odblokowuje przyciski. Lista `/dashboard/events` uzywa bezpiecznego refreshu po focus/visibility zamiast streamow per event. Public join i public queue nadal maja po jednym venue streamie na slug. Stabilnosc akcji operatora ma priorytet nad idealnym realtime listy.
+D4.2/P0 utwardza lifecycle controls przed connection starvation i wiszacymi fetchami. Strona operator queue nie otwiera juz dashboard SSE jako krytycznego kanalu; lifecycle action wykonuje POST/PATCH z timeoutem, po sukcesie robi deterministyczny refetch event detail + operator queue, a przy bledzie zawsze odblokowuje przyciski. Lista `/dashboard/events` uzywa bezpiecznego refreshu po focus/visibility zamiast streamow per event. Canonical public queue korzysta z event-scoped streamu. Stabilnosc akcji operatora ma priorytet nad idealnym realtime listy.
 
 D4.4 dodaje safe refresh UX dla `/dashboard/events` bez EventSource per event. Lista ma reczny przycisk `Odswiez`, timestamp ostatniego odswiezenia, non-fatal error bez ukrywania starej listy, refresh po focus/visibility oraz polling co 15 sekund tylko dla widocznej karty z in-flight guardem. Operator actions dalej maja priorytet nad realtime listy. Jesli bedzie potrzebny prawdziwy realtime listy, follow-up to RT1: pojedynczy `/dashboard/events/stream` albo `/dashboard/stream`, nie stream per event.
 
-D4.5 domyka status propagation miedzy public join i dashboard operator queue bez wracania do agresywnego SSE. `/dashboard/events/:eventId/queue` ma reczny przycisk `Odswiez kolejke`, non-fatal blad refreshu, focus/visibility refresh oraz polling co 5 sekund tylko dla widocznej karty i tylko gdy nie trwa mutacja operatora. Public join sledzi status wlasnego zgloszenia przez `GET /public/venues/:venueSlug/my-requests`; endpoint uzywa cookie `pn_participant`, filtruje po hashu participant tokena, nie przyjmuje tokena w query/body i nie zwraca cudzych requestow ani plaintext tokena. Po approve/reject/start/done/skip komunikat na `/[venueSlug]/join` odswieza sie przez safe polling/focus refresh.
+D4.5 domyka status propagation miedzy public join i dashboard operator queue bez wracania do agresywnego SSE. `/dashboard/events/:eventId/queue` ma reczny przycisk `Odswiez kolejke`, non-fatal blad refreshu, focus/visibility refresh oraz polling co 5 sekund tylko dla widocznej karty i tylko gdy nie trwa mutacja operatora. Canonical event page sledzi status wlasnego zgloszenia przez `GET /public/events/:eventPublicId/my-requests`; endpoint uzywa cookie `pn_participant`, filtruje po hashu participant tokena, nie przyjmuje tokena w query/body i nie zwraca cudzych requestow ani plaintext tokena.
 
 D5 dodaje minimalny flow tworzenia wydarzenia bez pelnego CRUD. `/dashboard/events` ma akcje `Nowe wydarzenie`, a `/dashboard/events/new` pobiera `GET /dashboard/venues`, pokazuje wybor lokalu, nazwe, slug, status `draft|scheduled|active`, opcjonalne daty oraz flagi `publicJoinEnabled` i `publicQueueEnabled`. Submit uzywa `POST /dashboard/events` z `credentials: include` i po sukcesie kieruje do `/dashboard/events/:eventId/queue`. Platform owner ma MVP support/admin mozliwosc tworzenia eventu dla dostepnego lokalu, a konflikt sluga jest mapowany na kontrolowany `409 EVENT_SLUG_CONFLICT`. Seed demo nie jest juz jedynym sposobem posiadania eventu, ale pelny CRUD eventow/lokali/organizacji, staff assignment UI i tworzenie venue pozostaja odroczone.
 

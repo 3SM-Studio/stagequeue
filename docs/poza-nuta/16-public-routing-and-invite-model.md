@@ -1,22 +1,16 @@
 # Public Routing and Invite Model
 
-Status: accepted product/architecture decision for the next public routing work. This document freezes the target model before implementing realtime and routing changes. It does not change the current MVP routes by itself.
+Status: accepted product/architecture decision, partially implemented. The public participant flow is event-first; legacy venue-scoped join and queue routes now return 404.
 
 ## Problem
 
-Current public-web uses venue-first MVP shortcuts:
+Earlier public-web versions used venue-first MVP shortcuts:
 
 - `/:venueSlug`
 - `/:venueSlug/join`
 - `/:venueSlug/queue`
 
-They work for the demo and local QA, but they are semantically weak as the long-term public UX. A participant joins a concrete karaoke event, not an abstract venue. Manual QA also showed gaps around realtime propagation:
-
-- public join and queue do not fully react to `publicJoinEnabled` / `publicQueueEnabled` changes in the target model;
-- public venue page does not represent newly created or newly started active events as a first-class realtime surface;
-- implementing more realtime on legacy shortcuts before choosing the target routes would lock in the wrong model.
-
-The product needs a stable routing and invite decision before the next implementation tasks.
+They were semantically weak because a participant joins a concrete karaoke event, not an abstract venue. They also allowed a venue lookup to select an event implicitly, which is unsafe once visibility and access policy are event-scoped. Keeping them would lock further public UX and realtime work into the wrong model.
 
 ## Decyzja
 
@@ -26,11 +20,12 @@ The target public routing model is event-first for the participant flow and hand
 2. `/@:handle` is the public profile for a venue, organizer, or brand.
 3. `/event/:eventPublicId` is the main public page for a concrete event.
 4. `/invite/:inviteCode` is a magic invite link issued by an operator.
-5. Existing venue-first routes stay as legacy/MVP shortcuts until migrated.
-6. There is no separate global `/events` route in this decision.
-7. Event slugs are not the primary public event identity.
+5. `/:venueSlug` may remain temporarily as a read-only legacy venue page, but it links only to canonical event pages.
+6. Venue-scoped join, queue, and event-slug routes return 404 and do not redirect.
+7. There is no separate global `/events` route in this decision.
+8. Event slugs are not the primary public event identity.
 
-This keeps the public UX shareable, stable, and privacy-aware while preserving the current MVP flow until replacement routes exist.
+This keeps the public UX shareable, stable, and privacy-aware while preventing venue lookup from silently choosing a participant's event.
 
 ## Routing Docelowy
 
@@ -70,6 +65,13 @@ Expected future behavior:
 - show public queue when `publicQueueEnabled=true` and event status policy allows it;
 - track participant-visible state through participant cookie / request ownership;
 - refresh status, queue, `publicJoinEnabled`, `publicQueueEnabled`, and own request status after dashboard mutations.
+- submit only through this event-scoped page after status, visibility, public join, and participant access policy allow it.
+
+### `/event/:eventPublicId/queue`
+
+Future canonical standalone public queue route for a concrete event.
+
+It is not implemented yet. The current `/event/:eventPublicId` page already renders the event-scoped public queue when policy allows it. A follow-up may extract that queue into this URL without reintroducing venue-scoped lookup.
 
 ### `/invite/:inviteCode`
 
@@ -82,25 +84,23 @@ Expected future behavior:
 3. Redirect to `/event/:eventPublicId`.
 4. If invalid, expired, revoked, or already rotated, show a controlled invalid invite state.
 
-Invite links are not the stable event URL. They are an access mechanism that can be rotated or revoked.
+Invite links are not submit pages or stable event URLs. They are an access mechanism that can be rotated or revoked; after claim, participation continues on `/event/:eventPublicId`.
 
-## Legacy / MVP Routes
+## Legacy Routes
 
-The current routes remain supported until a migration task replaces them:
+`/:venueSlug` remains temporarily as a read-only venue page. If it has a discoverable active event, its CTA points to `/event/:eventPublicId`.
 
-- `/:venueSlug`
-- `/:venueSlug/join`
-- `/:venueSlug/queue`
+The following deprecated routes return 404:
 
-Target migration behavior:
+- `/:venueSlug/join`;
+- `/:venueSlug/queue`;
+- `/:venueSlug/events/:eventSlug`;
+- `/:venueSlug/events/:eventSlug/join`;
+- `/:venueSlug/events/:eventSlug/queue`.
 
-- `/:venueSlug` should redirect to `/@:handle` once handles exist.
-- `/:venueSlug/join` should redirect to the active event page or show a controlled selection / no-active-event state.
-- `/:venueSlug/queue` should redirect to the event page with queue section or show a controlled selection / no-active-event state.
+They deliberately do not redirect through a venue active-event lookup. Such a redirect could select or reveal the wrong event after visibility, lifecycle, or access-policy changes.
 
-These routes are legacy/MVP venue-first shortcuts. They must not regress while they exist, but they are not the long-term center of realtime work.
-
-Current event-slug placeholders under `/:venueSlug/events/:eventSlug` remain placeholders. They are not promoted to the target model by this decision.
+Public profile routing through `/@:handle` or `/venue/:venuePublicId` remains a separate future task. This cleanup does not introduce a handle model, profile identifier, or profile redesign.
 
 ## Identyfikatory
 
@@ -203,7 +203,7 @@ Target realtime work should focus on these future surfaces:
   - `publicQueueEnabled`;
   - participant-visible request state;
   - invite/access state when relevant.
-- Legacy venue-first shortcuts continue to work until migration, but should not receive large new realtime architecture beyond regression protection.
+- Removed venue-first join and queue routes receive no realtime support.
 
 Realtime implementation should preserve the current safety lessons:
 
@@ -222,7 +222,7 @@ Realtime implementation should preserve the current safety lessons:
 - Participant cookies and token hashes must remain private; invite handling must not expose participant tokens in response bodies, URLs, logs, or public HTML.
 - Handles are public identity only; they must not grant dashboard or operator permission.
 - Handle lookup must be case-insensitive and protected against reserved/static path collisions.
-- Legacy `/:venueSlug` paths must keep reserved slug guards for `sw.js`, `_next`, assets, manifest, robots, sitemap, and similar static paths.
+- The temporary read-only `/:venueSlug` page must keep reserved slug guards for `sw.js`, `_next`, assets, manifest, robots, sitemap, and similar static paths.
 
 ## Implementation Plan W Małych Taskach
 
@@ -249,18 +249,17 @@ Realtime implementation should preserve the current safety lessons:
    - redirect to `/event/:eventPublicId`.
    - Future dashboard work: add a small invite management panel for revoke/rotate once the dashboard invite surface is stable.
    - Future access work: add explicit participant access revoke if operators need to remove already granted participant access.
-6. Migrate legacy venue-first routes:
-   - redirect `/:venueSlug` to `/@:handle`;
-   - redirect or controlled-select `/:venueSlug/join`;
-   - redirect or controlled-select `/:venueSlug/queue`;
-   - preserve backwards compatibility during rollout.
+6. Remove legacy venue-first participant routes:
+   - keep only a temporary read-only `/:venueSlug` page;
+   - return 404 for venue-scoped join, queue, and event-slug routes;
+   - do not redirect through active-event lookup.
 7. Update QA playbook and release evidence templates for event-first public URLs.
 8. Only after the route migration, revisit realtime coverage for the new event-first pages.
 
 ## Non-goals
 
-- No code implementation in this task.
-- No new routes are added by this document.
+- No `/@:handle` or `/venue/:venuePublicId` profile implementation.
+- No standalone `/event/:eventPublicId/queue` implementation in the routing cleanup.
 - No global `/events` directory.
 - No promotion of event slugs as primary public event URLs.
 - No participant accounts.
