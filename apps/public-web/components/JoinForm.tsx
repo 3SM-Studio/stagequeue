@@ -12,12 +12,11 @@ import {
   getMyRequestStatusMessage,
   getTrackedRequest,
   PUBLIC_MY_REQUESTS_REFRESH_ERROR_MESSAGE,
-  PUBLIC_MY_REQUESTS_REFRESH_INTERVAL_MS,
-  shouldPollMyRequests
+  shouldRefreshMyRequestsOnFocus
 } from "../lib/myRequestsState"
 import { validateSubmitSongRequest } from "../lib/submitValidation"
 
-type JoinFormProps =
+type JoinFormProps = (
   | {
       eventPublicId: string
       venueSlug?: never
@@ -26,6 +25,9 @@ type JoinFormProps =
       eventPublicId?: never
       venueSlug: string
     }
+) & {
+  requests?: PublicMyRequest[]
+}
 
 export function JoinForm(props: JoinFormProps) {
   const scopeKind = props.eventPublicId !== undefined ? "event" : "venue"
@@ -68,28 +70,30 @@ export function JoinForm(props: JoinFormProps) {
   }, [eventPublicId, scopeKind, trackedRequestId, venueSlug])
 
   useEffect(() => {
+    const nextRequest = getTrackedRequest(props.requests ?? [], trackedRequestId)
+    if (nextRequest) {
+      setTrackedRequest(nextRequest)
+      setRefreshError(null)
+    }
+  }, [props.requests, trackedRequestId])
+
+  useEffect(() => {
     const onFocus = () => {
-      if (shouldPollMyRequests(trackedRequest, document.visibilityState)) {
+      if (shouldRefreshMyRequestsOnFocus(trackedRequest, document.visibilityState)) {
         void refreshMyRequest()
       }
     }
     const onVisibilityChange = () => {
-      if (shouldPollMyRequests(trackedRequest, document.visibilityState)) {
+      if (shouldRefreshMyRequestsOnFocus(trackedRequest, document.visibilityState)) {
         void refreshMyRequest()
       }
     }
-    const interval = window.setInterval(() => {
-      if (shouldPollMyRequests(trackedRequest, document.visibilityState)) {
-        void refreshMyRequest()
-      }
-    }, PUBLIC_MY_REQUESTS_REFRESH_INTERVAL_MS)
 
     window.addEventListener("focus", onFocus)
     document.addEventListener("visibilitychange", onVisibilityChange)
     return () => {
       window.removeEventListener("focus", onFocus)
       document.removeEventListener("visibilitychange", onVisibilityChange)
-      window.clearInterval(interval)
     }
   }, [refreshMyRequest, trackedRequest])
 

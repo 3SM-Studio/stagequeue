@@ -34,8 +34,7 @@ import {
   createMyRequestsRefreshController,
   getMyRequestStatusMessage,
   getTrackedRequest,
-  PUBLIC_MY_REQUESTS_REFRESH_INTERVAL_MS,
-  shouldPollMyRequests
+  shouldRefreshMyRequestsOnFocus
 } from "../apps/public-web/lib/myRequestsState.ts"
 import {
   getPublicDiscoveryPageData,
@@ -750,6 +749,7 @@ test("public queue stream uses one event source and refetches after events and r
   const statuses: string[] = []
   const eventTypes: string[] = []
   let factoryCalls = 0
+  let openCount = 0
   let refetchCount = 0
   let requestedUrl = ""
   let withCredentials = false
@@ -762,6 +762,9 @@ test("public queue stream uses one event source and refetches after events and r
       return source
     },
     onEvent: (eventType) => eventTypes.push(eventType),
+    onOpen: () => {
+      openCount += 1
+    },
     onRefetch: () => {
       refetchCount += 1
     },
@@ -770,6 +773,9 @@ test("public queue stream uses one event source and refetches after events and r
   })
 
   source.open()
+  source.onerror?.(new Event("error"))
+  source.emit("connected")
+  source.onerror?.(new Event("error"))
   source.emit("request.approved")
   source.open()
 
@@ -777,12 +783,21 @@ test("public queue stream uses one event source and refetches after events and r
   assert.equal(requestedUrl, "http://localhost:4321/public/events/ka2Md-d1das/stream")
   assert.equal(withCredentials, true)
   assert.equal(refetchCount, 3)
+  assert.equal(openCount, 2)
   assert.deepEqual(eventTypes, ["request.approved"])
-  assert.deepEqual(statuses, ["connecting", "connected", "connected"])
+  assert.deepEqual(statuses, [
+    "connecting",
+    "connected",
+    "reconnecting",
+    "connected",
+    "reconnecting",
+    "connected",
+    "connected"
+  ])
 
   stream.close()
   assert.equal(source.closeCalls, 1)
-  assert.equal(statuses.at(-1), "stale")
+  assert.equal(statuses.at(-1), "reconnecting")
 })
 
 test("canonical public queue component uses event stream lifecycle and visibility fallback", () => {
@@ -791,11 +806,12 @@ test("canonical public queue component uses event stream lifecycle and visibilit
 
   assert.match(source, /buildPublicEventStreamUrl\(eventPublicId\)/)
   assert.match(source, /createPublicQueueStream/)
-  assert.match(source, /eventType\.startsWith\("event\."\)/)
   assert.match(source, /window\.addEventListener\("focus"/)
   assert.match(source, /document\.addEventListener\("visibilitychange"/)
   assert.doesNotMatch(source, /buildPublicVenueStreamUrl|venueSlug/)
-  assert.match(eventPageSource, /onLifecycleEvent=\{refresh\}/)
+  assert.doesNotMatch(source, /setInterval|clearInterval|refetchInterval|REFRESH_INTERVAL/)
+  assert.match(eventPageSource, /onRealtimeRefresh=\{refreshParticipantState\}/)
+  assert.match(eventPageSource, /requests=\{myRequests\}/)
 })
 
 test("public-web join refetch helper reacts to lifecycle and queue events", () => {
@@ -1029,15 +1045,30 @@ test("public-web tracked request helper finds own request and handles missing co
   assert.equal(getTrackedRequest([], "request-1"), null)
 })
 
-test("public-web my-requests polling runs only while there is an active tracked request", () => {
-  assert.equal(PUBLIC_MY_REQUESTS_REFRESH_INTERVAL_MS, 5000)
-  assert.equal(shouldPollMyRequests(myRequest("pending"), "visible"), true)
-  assert.equal(shouldPollMyRequests(myRequest("approved"), "visible"), true)
-  assert.equal(shouldPollMyRequests(myRequest("now"), "visible"), true)
-  assert.equal(shouldPollMyRequests(myRequest("done"), "visible"), false)
-  assert.equal(shouldPollMyRequests(myRequest("rejected"), "visible"), false)
-  assert.equal(shouldPollMyRequests(myRequest("pending"), "hidden"), false)
-  assert.equal(shouldPollMyRequests(null, "visible"), false)
+test("public-web my-requests uses one-shot focus refresh without cyclic polling", () => {
+  assert.equal(shouldRefreshMyRequestsOnFocus(myRequest("pending"), "visible"), true)
+  assert.equal(shouldRefreshMyRequestsOnFocus(myRequest("approved"), "visible"), true)
+  assert.equal(shouldRefreshMyRequestsOnFocus(myRequest("now"), "visible"), true)
+  assert.equal(shouldRefreshMyRequestsOnFocus(myRequest("done"), "visible"), false)
+  assert.equal(shouldRefreshMyRequestsOnFocus(myRequest("rejected"), "visible"), false)
+  assert.equal(shouldRefreshMyRequestsOnFocus(myRequest("pending"), "hidden"), false)
+  assert.equal(shouldRefreshMyRequestsOnFocus(null, "visible"), false)
+
+  const source = readFileSync("apps/public-web/components/JoinForm.tsx", "utf8")
+  assert.doesNotMatch(source, /setInterval|clearInterval|refetchInterval|REFRESH_INTERVAL/)
+})
+
+test("browser live views contain no interval polling transport", () => {
+  for (const path of [
+    "apps/public-web/components/JoinForm.tsx",
+    "apps/public-web/components/PublicQueueView.tsx",
+    "apps/dashboard-web/components/DashboardEventsView.tsx",
+    "apps/dashboard-web/components/OperatorQueueView.tsx",
+    "apps/web/src/main.tsx"
+  ]) {
+    const source = readFileSync(path, "utf8")
+    assert.doesNotMatch(source, /setInterval|clearInterval|refetchInterval|usePolling|REFRESH_INTERVAL/, path)
+  }
 })
 
 test("public-web my-requests refresh controller blocks overlapping refreshes", async () => {

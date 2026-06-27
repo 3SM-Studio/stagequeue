@@ -25,17 +25,24 @@ export function createOperatorQueueStream({
   const eventSource = eventSourceFactory(streamUrl, { withCredentials: true })
   const refetch = () => onRefetch()
 
-  eventSource.onopen = () => onStatusChange("connected")
-  eventSource.onerror = () => onStatusChange("disconnected")
+  eventSource.onopen = () => {
+    onStatusChange("connected")
+    onRefetch()
+  }
+  eventSource.onerror = () => onStatusChange("reconnecting")
+  eventSource.addEventListener("connected", () => onStatusChange("connected"))
 
   for (const eventType of operatorQueueRefetchEvents) {
-    eventSource.addEventListener(eventType, refetch)
+    eventSource.addEventListener(eventType, () => {
+      onStatusChange("connected")
+      refetch()
+    })
   }
 
   return {
     close() {
       eventSource.close()
-      onStatusChange("disconnected")
+      onStatusChange("reconnecting")
     }
   }
 }

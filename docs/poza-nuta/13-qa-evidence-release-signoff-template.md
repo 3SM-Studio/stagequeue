@@ -86,7 +86,7 @@ Use one row per scenario from the live karaoke manual QA playbook.
 | Flow step | Evidence captured | Pass/Fail | Notes |
 |---|---|---|---|
 | Participant submit from public join | Screenshot / request ID / log line |  |  |
-| Operator queue update via SSE/safe refresh | Screenshot before/after |  |  |
+| Operator queue update via SSE | Screenshot before/after |  |  |
 | Approve request | Screenshot / API request ID |  |  |
 | Start request | Screenshot / public status update |  |  |
 | Done request | Screenshot / final participant state |  |  |
@@ -148,7 +148,7 @@ Blocker definition:
 
 Non-blocker examples:
 
-- safe refresh delay is visible but within expected range;
+- SSE reconnect delay is visible but within expected range;
 - manual refresh is needed after network recovery;
 - cosmetic UI issue without data/security impact.
 
@@ -184,7 +184,7 @@ Run these after deployment or demo handoff.
 | Public web | Venue/join/queue reachable |  |  |  |
 | Dashboard web | Dashboard/events/queue reachable |  |  |  |
 | Live queue flow | One smoke participant request works |  |  |  |
-| SSE / refresh | Updates arrive or safe refresh works |  |  |  |
+| SSE / reconnect | Updates arrive and reconnect restores live state |  |  |  |
 | User-visible regressions | None reported |  |  |  |
 | Audit log | Platform support audit still records events |  |  |  |
 

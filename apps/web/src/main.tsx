@@ -133,11 +133,12 @@ function PublicQueueView({ api, eventId }: { api: ApiClient; eventId: string }) 
     }
   }, [api, eventId]);
 
-  usePolling(refresh, 3000);
+  useInitialRefresh(refresh);
 
   return (
     <Shell title="Kolejka publiczna" eventId={eventId}>
       <Message error={error} />
+      <button className="secondary" onClick={() => void refresh()}>Odśwież</button>
       <div className="queue-grid">
         <QueueCard title="Now" item={queue?.now} empty="Nikt teraz nie śpiewa." />
         <QueueCard title="Next" item={queue?.next} empty="Brak następnej osoby." />
@@ -163,7 +164,7 @@ function OperatorView({ api, eventId }: { api: ApiClient; eventId: string }) {
     }
   }, [api, eventId]);
 
-  usePolling(refresh, 2000);
+  useInitialRefresh(refresh);
 
   async function action(operation: () => Promise<{ operatorQueue: OperatorQueueDto }>) {
     try {
@@ -178,6 +179,7 @@ function OperatorView({ api, eventId }: { api: ApiClient; eventId: string }) {
   return (
     <Shell title="Panel prowadzącego" eventId={eventId}>
       <Message error={error} />
+      <button className="secondary" onClick={() => void refresh()}>Odśwież</button>
       <OperatorGroup title="Now" requests={queue?.now ?? []} actions={(request) => <button onClick={() => action(() => api.done(eventId))}>Done</button>} />
       <OperatorGroup title="Pending" requests={queue?.pending ?? []} actions={(request) => (
         <>
@@ -280,22 +282,10 @@ function EmptyState({ title, text }: { title: string; text: string }) {
   );
 }
 
-function usePolling(callback: () => Promise<void>, intervalMs: number) {
+function useInitialRefresh(callback: () => Promise<void>) {
   useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      if (!cancelled) {
-        await callback();
-      }
-    };
-    void tick();
-    const interval = window.setInterval(tick, intervalMs);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [callback, intervalMs]);
+    void callback();
+  }, [callback]);
 }
 
 function parseRoute(pathname: string): { eventId: string; view: "participant" | "public" | "operator" } | null {

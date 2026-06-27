@@ -70,7 +70,6 @@ import {
   DASHBOARD_EVENTS_LIST_REFRESH_MODE,
   DASHBOARD_EVENTS_LIST_USES_EVENT_STREAMS,
   DASHBOARD_EVENTS_REFRESH_ERROR_MESSAGE,
-  DASHBOARD_EVENTS_REFRESH_INTERVAL_MS,
   getDashboardEventStreamKey,
   getDashboardEventStreamSubscriptions,
   getDashboardEventGroup,
@@ -81,7 +80,6 @@ import {
   MANUAL_EVENT_ID_FALLBACK_DESCRIPTION,
   MANUAL_EVENT_ID_FALLBACK_TITLE,
   shouldRefetchDashboardEventsOnSse,
-  shouldPollDashboardEvents,
   shouldRefreshDashboardEventsOnFocus
 } from "../apps/dashboard-web/lib/eventsState.ts"
 import {
@@ -98,11 +96,10 @@ import {
   getOperatorQueueStreamSubscriptions,
   getOperatorQueueErrorState,
   OPERATOR_QUEUE_REFRESH_ERROR_MESSAGE,
-  OPERATOR_QUEUE_REFRESH_INTERVAL_MS,
   operatorQueueRefetchEvents,
   runOperatorActionWithPending,
   runOperatorMutationWithRefresh,
-  shouldPollOperatorQueue,
+  shouldRefreshOperatorQueueOnFocus,
   shouldRefetchOperatorQueue
 } from "../apps/dashboard-web/lib/operatorQueueState.ts"
 import { createOperatorQueueStream, type DashboardEventSource } from "../apps/dashboard-web/lib/operatorQueueStream.ts"
@@ -1041,11 +1038,12 @@ test("dashboard-web events list uses focus refresh fallback instead of critical 
   assert.equal(shouldRefreshDashboardEventsOnFocus("visibilitychange", "hidden"), false)
 })
 
-test("dashboard-web events safe refresh interval and polling visibility policy are explicit", () => {
-  assert.equal(DASHBOARD_EVENTS_REFRESH_INTERVAL_MS, 15000)
-  assert.equal(shouldPollDashboardEvents("visible"), true)
-  assert.equal(shouldPollDashboardEvents("hidden"), false)
-  assert.equal(shouldPollDashboardEvents("prerender"), false)
+test("dashboard-web events list has no cyclic polling", () => {
+  const source = readFileSync("apps/dashboard-web/components/DashboardEventsView.tsx", "utf8")
+
+  assert.doesNotMatch(source, /setInterval|clearInterval|refetchInterval|REFRESH_INTERVAL/)
+  assert.match(source, /window\.addEventListener\("focus"/)
+  assert.match(source, /document\.addEventListener\("visibilitychange"/)
 })
 
 test("dashboard-web events refresh controller blocks overlapping list requests", async () => {
@@ -1384,8 +1382,10 @@ test("dashboard-web stream URL builder uses dashboard event stream endpoint", ()
 })
 
 test("dashboard-web operator queue stream opens one event stream with credentials", () => {
+  const source = new FakeDashboardEventSource()
   const statuses: string[] = []
   let factoryCalls = 0
+  let refetchCount = 0
   let requestedUrl = ""
   let requestedCredentials = false
 
@@ -1394,9 +1394,11 @@ test("dashboard-web operator queue stream opens one event stream with credential
       factoryCalls += 1
       requestedUrl = url
       requestedCredentials = init.withCredentials
-      return new FakeDashboardEventSource()
+      return source
     },
-    onRefetch: () => undefined,
+    onRefetch: () => {
+      refetchCount += 1
+    },
     onStatusChange: (status) => statuses.push(status),
     streamUrl: "http://localhost:4321/dashboard/events/event-1/stream"
   })
@@ -1405,6 +1407,23 @@ test("dashboard-web operator queue stream opens one event stream with credential
   assert.equal(requestedUrl, "http://localhost:4321/dashboard/events/event-1/stream")
   assert.equal(requestedCredentials, true)
   assert.deepEqual(statuses, ["connecting"])
+
+  source.onopen?.(new Event("open"))
+  source.onerror?.(new Event("error"))
+  source.emit("connected")
+  source.onerror?.(new Event("error"))
+  source.onopen?.(new Event("open"))
+
+  assert.equal(factoryCalls, 1)
+  assert.equal(refetchCount, 2)
+  assert.deepEqual(statuses, [
+    "connecting",
+    "connected",
+    "reconnecting",
+    "connected",
+    "reconnecting",
+    "connected"
+  ])
 
   stream.close()
 })
@@ -1445,24 +1464,31 @@ test("dashboard-web operator queue stream cleanup closes subscription", () => {
   stream.close()
 
   assert.equal(source.closeCalls, 1)
-  assert.deepEqual(statuses, ["connecting", "disconnected"])
+  assert.deepEqual(statuses, ["connecting", "reconnecting"])
 })
 
-test("dashboard-web operator queue stream errors are non-fatal", () => {
+test("dashboard-web operator queue stream returns to live after an event following an error", () => {
   const source = new FakeDashboardEventSource()
   const statuses: string[] = []
+  let refetchCount = 0
 
   const stream = createOperatorQueueStream({
     eventSourceFactory: () => source,
-    onRefetch: () => undefined,
+    onRefetch: () => {
+      refetchCount += 1
+    },
     onStatusChange: (status) => statuses.push(status),
     streamUrl: "http://localhost:4321/dashboard/events/event-1/stream"
   })
 
   source.onerror?.(new Event("error"))
+  assert.equal(statuses.at(-1), "reconnecting")
+
+  source.emit("queue.updated")
   const state = getOperatorQueueStreamErrorState()
 
-  assert.equal(statuses.at(-1), "disconnected")
+  assert.equal(statuses.at(-1), "connected")
+  assert.equal(refetchCount, 1)
   assert.equal(state.fatal, false)
   assert.equal(state.kind, "stale")
   stream.close()
@@ -1487,11 +1513,13 @@ test("dashboard-web operator queue refetch helper reacts to queue events", () =>
   assert.equal(shouldRefetchOperatorQueue("connected"), false)
 })
 
-test("dashboard-web operator queue safe refresh interval and visibility policy are explicit", () => {
-  assert.equal(OPERATOR_QUEUE_REFRESH_INTERVAL_MS, 5000)
-  assert.equal(shouldPollOperatorQueue("visible", null), true)
-  assert.equal(shouldPollOperatorQueue("hidden", null), false)
-  assert.equal(shouldPollOperatorQueue("visible", "pause"), false)
+test("dashboard-web operator queue uses one-shot focus refresh without cyclic polling", () => {
+  assert.equal(shouldRefreshOperatorQueueOnFocus("visible", null), true)
+  assert.equal(shouldRefreshOperatorQueueOnFocus("hidden", null), false)
+  assert.equal(shouldRefreshOperatorQueueOnFocus("visible", "pause"), false)
+
+  const source = readFileSync("apps/dashboard-web/components/OperatorQueueView.tsx", "utf8")
+  assert.doesNotMatch(source, /setInterval|clearInterval|refetchInterval|REFRESH_INTERVAL/)
 })
 
 test("dashboard-web operator queue refresh controller blocks overlapping refreshes", async () => {

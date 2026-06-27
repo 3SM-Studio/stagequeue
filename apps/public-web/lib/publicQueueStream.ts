@@ -1,6 +1,6 @@
 import { queueRefreshEvents } from "./queueRefresh.ts"
 
-export type PublicQueueStreamStatus = "connecting" | "connected" | "stale"
+export type PublicQueueStreamStatus = "connecting" | "connected" | "reconnecting"
 
 export type PublicQueueEventSource = {
   addEventListener: (type: string, listener: (event: MessageEvent) => void) => void
@@ -17,12 +17,14 @@ export type PublicQueueEventSourceFactory = (
 export function createPublicQueueStream({
   eventSourceFactory,
   onEvent,
+  onOpen,
   onRefetch,
   onStatusChange,
   streamUrl
 }: {
   eventSourceFactory: PublicQueueEventSourceFactory
   onEvent?: (eventType: string) => void
+  onOpen?: () => void
   onRefetch: () => void
   onStatusChange: (status: PublicQueueStreamStatus) => void
   streamUrl: string
@@ -32,12 +34,15 @@ export function createPublicQueueStream({
   const eventSource = eventSourceFactory(streamUrl, { withCredentials: true })
   eventSource.onopen = () => {
     onStatusChange("connected")
+    onOpen?.()
     onRefetch()
   }
-  eventSource.onerror = () => onStatusChange("stale")
+  eventSource.onerror = () => onStatusChange("reconnecting")
+  eventSource.addEventListener("connected", () => onStatusChange("connected"))
 
   for (const eventType of queueRefreshEvents) {
     eventSource.addEventListener(eventType, () => {
+      onStatusChange("connected")
       onEvent?.(eventType)
       onRefetch()
     })
@@ -46,7 +51,7 @@ export function createPublicQueueStream({
   return {
     close() {
       eventSource.close()
-      onStatusChange("stale")
+      onStatusChange("reconnecting")
     }
   }
 }

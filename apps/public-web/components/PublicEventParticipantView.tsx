@@ -30,6 +30,7 @@ export function PublicEventParticipantView({
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const inFlightRefresh = useRef<Promise<void> | null>(null)
+  const inFlightParticipantRefresh = useRef<Promise<void> | null>(null)
   const state = getPublicEventPageState(detail)
 
   const refresh = useCallback(async () => {
@@ -60,6 +61,31 @@ export function PublicEventParticipantView({
     inFlightRefresh.current = request
     return request
   }, [detail.publicQueue.visible, eventPublicId])
+
+  const refreshParticipantState = useCallback(async () => {
+    if (inFlightParticipantRefresh.current) {
+      return inFlightParticipantRefresh.current
+    }
+
+    const request = Promise.all([
+      getPublicEventDetail(eventPublicId),
+      getMyRequestsByEventPublicId(eventPublicId)
+    ])
+      .then(([nextDetail, nextMyRequests]) => {
+        setDetail(nextDetail)
+        setMyRequests(nextMyRequests.requests)
+        setRefreshError(null)
+      })
+      .catch(() => {
+        setRefreshError("Nie udalo sie odswiezyc strony wydarzenia.")
+      })
+      .finally(() => {
+        inFlightParticipantRefresh.current = null
+      })
+
+    inFlightParticipantRefresh.current = request
+    return request
+  }, [eventPublicId])
 
   useEffect(() => {
     void refresh()
@@ -109,7 +135,7 @@ export function PublicEventParticipantView({
         {detail.submissions.enabled ? (
           <>
             <h2>Zglos piosenke</h2>
-            <JoinForm eventPublicId={eventPublicId} />
+            <JoinForm eventPublicId={eventPublicId} requests={myRequests} />
           </>
         ) : detail.submissions.reason === "ACCESS_REQUIRED" ? (
           <>
@@ -150,7 +176,7 @@ export function PublicEventParticipantView({
           <PublicQueueView
             eventPublicId={eventPublicId}
             initialQueue={queue}
-            onLifecycleEvent={refresh}
+            onRealtimeRefresh={refreshParticipantState}
           />
         ) : (
           <div className="panel state-panel">
