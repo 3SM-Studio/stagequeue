@@ -50,7 +50,8 @@ requestow. Nie tworzy prawdziwych userow auth ani sekretow.
 Adresy do QA:
 
 - `http://localhost:3000/` - public discovery,
-- `http://localhost:3000/event/<eventPublicId>` - canonical event detail, submit i kolejka,
+- `http://localhost:3000/event/<eventPublicId>` - informacyjny landing eventu,
+- `http://localhost:3000/event/<eventPublicId>/session` - submit, wlasne zgloszenia i kolejka,
 - `http://localhost:3000/demo-klub` - tymczasowy read-only profil lokalu.
 
 `eventPublicId` odczytasz z kolumny `events.public_id`. Legacy URL-e `/demo-klub/join` i `/demo-klub/queue`
@@ -363,9 +364,9 @@ NEXT_PUBLIC_API_URL=http://localhost:4321
 Public-web uzywa event-first participant flow:
 
 - `/` - public discovery,
-- `/event/[eventPublicId]` - canonical event detail i submit wedlug event access policy,
-- `/event/[eventPublicId]/queue` - canonical read-only public queue dla wydarzenia,
-- `/invite/[inviteCode]` - claim invite i redirect do canonical event page,
+- `/event/[eventPublicId]` - informacyjny landing wydarzenia,
+- `/event/[eventPublicId]/session` - participant app: submit, wlasne zgloszenia i publiczna kolejka,
+- `/invite/[inviteCode]` - claim invite i redirect do participant session,
 - `/[venueSlug]` - tymczasowy read-only profil lokalu; aktywny event linkuje do `/event/[eventPublicId]`.
 
 Usuniete venue-scoped participant routes zwracaja 404 i nie redirectuja przez active-event lookup:
@@ -376,10 +377,10 @@ Usuniete venue-scoped participant routes zwracaja 404 i nie redirectuja przez ac
 - `/[venueSlug]/events/[eventSlug]/join`,
 - `/[venueSlug]/events/[eventSlug]/queue`.
 
-`/event/[eventPublicId]/queue` uzywa istniejacego event-scoped API i nie przywraca venue lookup. Publiczne
-i unlisted eventy sa dostepne przez direct URL, gdy `publicQueueEnabled=true`; `invite_required` oraz
-`publicJoinEnabled=false` nie blokuja samego odczytu publicznej kolejki. Public profile routing `/@handle`
-albo `/venue/[venuePublicId]` pozostaje osobnym zadaniem.
+Standalone `/event/[eventPublicId]/queue` zwraca 404. Kolejka jest czescia participant session i nadal uzywa
+event-scoped API oraz jednego strumienia SSE. `invite_required` blokuje submit bez participant access, ale nie
+ukrywa informacyjnego landingu. Public profile routing `/@handle` albo `/venue/[venuePublicId]` pozostaje
+osobnym zadaniem.
 
 Preferowane endpointy publiczne dla uczestnika:
 

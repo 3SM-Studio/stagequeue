@@ -42,7 +42,8 @@ select id, public_id, slug, status from events where slug = 'demo-karaoke';
 ```
 
 Legacy URL-e `/demo-klub/join`, `/demo-klub/queue` oraz `/:venueSlug/events/:eventSlug*` maja zwracac 404.
-Canonical read-only public queue jest dostepna pod `/event/:eventPublicId/queue`.
+Informacyjny landing jest pod `/event/:eventPublicId`, a participant app z kolejka pod
+`/event/:eventPublicId/session`. Standalone `/event/:eventPublicId/queue` zwraca 404.
 
 ## 2. Accounts and Sessions
 
@@ -73,8 +74,8 @@ Canonical read-only public queue jest dostepna pod `/event/:eventPublicId/queue`
 ## 4. Participant Join Flow
 
 1. Otworz `http://localhost:3000/event/<eventPublicId>`.
-2. Sprawdz, ze strona pokazuje wlasciwy event oraz lokal bez ujawniania internal event UUID.
-3. Sprawdz, ze formularz jest widoczny tylko dla aktywnego eventu z wlaczonym public join i dozwolonym access policy.
+2. Sprawdz, ze landing pokazuje wlasciwy event oraz lokal bez formularza, kolejki i internal event UUID.
+3. Przejdz do `/event/<eventPublicId>/session` i sprawdz, ze formularz jest widoczny tylko dla aktywnego eventu z wlaczonym public join i dozwolonym access policy.
 4. Wyslij pusty formularz i potwierdz czytelne bledy walidacji.
 5. Wyslij poprawny request:
    - singer name;
@@ -95,7 +96,7 @@ Poczekaj na zatwierdzenie prowadzacego.
      - po start komunikat zmienia sie na "teraz twoja kolej";
      - po reject/skip/done komunikat pokazuje koncowy status.
 11. Dla `joinAccessMode=invite_required` sprawdz, ze bez claim formularz jest zablokowany.
-12. Otworz `/invite/<inviteCode>`, potwierdz redirect do `/event/<eventPublicId>` i ponow submit.
+12. Otworz `/invite/<inviteCode>`, potwierdz redirect do `/event/<eventPublicId>/session` i ponow submit.
 13. Potwierdz, ze `publicJoinEnabled=false` blokuje submit takze po claim.
 
 ## 5. Operator Queue Flow
@@ -140,9 +141,9 @@ Praktyczna kontrola w devtools:
 ### C20f staging evidence
 
 - [ ] Operator otwiera `/dashboard/events/<eventId>/queue`.
-- [ ] Telefon A skanuje `/invite/<inviteCode>`, wraca na `/event/<eventPublicId>` i wysyla piosenke.
+- [ ] Telefon A skanuje `/invite/<inviteCode>`, wraca na `/event/<eventPublicId>/session` i wysyla piosenke.
 - [ ] Pending request pojawia sie w operator queue bez recznego odswiezenia.
-- [ ] Telefon B ma otwarte `/event/<eventPublicId>/queue`.
+- [ ] Telefon B ma otwarte `/event/<eventPublicId>/session`.
 - [ ] Operator wykonuje approve, start, done i move/reorder.
 - [ ] Telefon B widzi zatwierdzenie, kolejnosc i zmiany `now` bez recznego odswiezenia.
 - [ ] Po rozlaczeniu i przywroceniu sieci telefonu B EventSource laczy sie ponownie i refetchuje snapshot.
@@ -155,19 +156,20 @@ Praktyczna kontrola w devtools:
 
 ## 7. Public Queue Visibility
 
-- [ ] Otworz `/event/<eventPublicId>/queue` z linku `Kolejka wydarzenia` na canonical event page.
+- [ ] Otworz `/event/<eventPublicId>/session` z landingu wydarzenia.
 - [ ] Link `Wroc do wydarzenia` prowadzi do `/event/<eventPublicId>`.
 - [ ] Pending requests nie sa widoczne publicznie.
 - [ ] Public queue pokazuje aktualny `now` oraz approved queue zgodnie z polityka produktu.
 - [ ] Prywatne notatki operatora nigdy nie sa widoczne publicznie.
-- [ ] `publicQueueEnabled=false` pokazuje kontrolowany stan `Kolejka tego wydarzenia nie jest publiczna.`.
-- [ ] `scheduled` pokazuje kontrolowany stan `Kolejka bedzie dostepna po rozpoczeciu wydarzenia.`.
+- [ ] `publicQueueEnabled=false` pokazuje kontrolowany stan ukrytej kolejki w participant session.
+- [ ] `scheduled` pokazuje kontrolowany stan niedostepnej kolejki bez formularza submit.
 - [ ] `paused` event: queue jest widoczna, ale join/submissions sa zamkniete.
 - [ ] `closed` event: submit jest zamkniety; snapshot kolejki jest traktowany zgodnie z aktualna polityka public API.
 - [ ] `invite_required` bez participant access nadal pozwala czytac publiczna kolejke, ale nie submitowac.
 - [ ] `publicJoinEnabled=false` nie blokuje odczytu publicznej kolejki.
 - [ ] `archived` i `cancelled` nie sa widoczne przez public queue.
 - [ ] Event albo venue ukryte administracyjnie nie ujawniaja prywatnego stanu publicznemu uzytkownikowi.
+- [ ] Standalone `/event/<eventPublicId>/queue` zwraca 404.
 
 ## 8. Lifecycle Checks
 

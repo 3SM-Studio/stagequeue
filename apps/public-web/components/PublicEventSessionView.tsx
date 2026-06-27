@@ -15,7 +15,7 @@ import { getPublicEventPageState } from "../lib/publicEventPageState"
 import { JoinForm } from "./JoinForm"
 import { PublicQueueView } from "./PublicQueueView"
 
-export function PublicEventParticipantView({
+export function PublicEventSessionView({
   eventPublicId,
   initialDetail,
   initialQueue
@@ -51,7 +51,7 @@ export function PublicEventParticipantView({
         setRefreshError(null)
       })
       .catch(() => {
-        setRefreshError("Nie udalo sie odswiezyc strony wydarzenia.")
+        setRefreshError("Nie udało się odświeżyć sesji wydarzenia.")
       })
       .finally(() => {
         setRefreshing(false)
@@ -77,7 +77,7 @@ export function PublicEventParticipantView({
         setRefreshError(null)
       })
       .catch(() => {
-        setRefreshError("Nie udalo sie odswiezyc strony wydarzenia.")
+        setRefreshError("Nie udało się odświeżyć sesji wydarzenia.")
       })
       .finally(() => {
         inFlightParticipantRefresh.current = null
@@ -95,17 +95,15 @@ export function PublicEventParticipantView({
     <main className="page-shell">
       <section className="hero">
         <div className="panel hero-copy">
-          <p className="eyebrow">{state.venueLabel}</p>
+          <p className="eyebrow">Sesja uczestnika · {state.venueLabel}</p>
           <h1>{state.title}</h1>
-          <p className="lead">Sprawdz status wydarzenia karaoke, dostepnosc zgloszen i publiczna kolejke.</p>
+          <p className="lead">Dodaj piosenkę, śledź swoje zgłoszenia i obserwuj kolejkę wydarzenia na żywo.</p>
           <div className="actions">
-            {state.showQueueLink ? (
-              <Link className="button primary" href={`/event/${eventPublicId}/queue`}>
-                Kolejka wydarzenia
-              </Link>
-            ) : null}
+            <Link className="button secondary" href={`/event/${eventPublicId}`}>
+              Wróć do wydarzenia
+            </Link>
             <button className="button secondary" disabled={refreshing} type="button" onClick={() => void refresh()}>
-              {refreshing ? "Odswiezanie..." : "Odswiez"}
+              {refreshing ? "Odświeżanie..." : "Odśwież"}
             </button>
           </div>
           {refreshError ? <p className="form-errors">{refreshError}</p> : null}
@@ -131,28 +129,28 @@ export function PublicEventParticipantView({
       </section>
 
       <section className="state-panel">
-        <p className="eyebrow">Zgloszenia</p>
+        <p className="eyebrow">Zgłoszenia</p>
         {detail.submissions.enabled ? (
           <>
-            <h2>Zglos piosenke</h2>
+            <h2>Zgłoś piosenkę</h2>
             <JoinForm eventPublicId={eventPublicId} requests={myRequests} />
           </>
         ) : detail.submissions.reason === "ACCESS_REQUIRED" ? (
           <>
             <h2>Wymagane zaproszenie</h2>
-            <p>{state.submissionsLabel}</p>
+            <p>Zeskanuj QR w lokalu, aby dołączyć do sesji.</p>
           </>
         ) : (
           <>
-            <h2>Zgloszenia sa zamkniete</h2>
+            <h2>Zgłoszenia są zamknięte</h2>
             <p>{state.submissionsLabel}</p>
           </>
         )}
       </section>
 
       <section className="panel state-panel">
-        <p className="eyebrow">Twoje zgloszenia</p>
-        <h2>Status zgloszen z tej przegladarki</h2>
+        <p className="eyebrow">Twoje zgłoszenia</p>
+        <h2>Status zgłoszeń z tej przeglądarki</h2>
         {myRequests.length > 0 ? (
           <ul className="queue-list">
             {myRequests.map((request) => (
@@ -167,7 +165,7 @@ export function PublicEventParticipantView({
             ))}
           </ul>
         ) : (
-          <p className="empty">Brak zgloszen powiazanych z ta przegladarka.</p>
+          <p className="empty">Brak zgłoszeń powiązanych z tą przeglądarką.</p>
         )}
       </section>
 

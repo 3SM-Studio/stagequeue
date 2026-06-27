@@ -18,9 +18,9 @@ The target public routing model is event-first for the participant flow and hand
 
 1. `/` is a bounded public discovery homepage for current events, upcoming events, and visible venues.
 2. `/@:handle` is the public profile for a venue, organizer, or brand.
-3. `/event/:eventPublicId` is the main public page for a concrete event.
-4. `/event/:eventPublicId/queue` is the canonical read-only public queue page for that event.
-5. `/invite/:inviteCode` is a magic invite link issued by an operator.
+3. `/event/:eventPublicId` is the informational landing page for a concrete event.
+4. `/event/:eventPublicId/session` is the participant app for submit, own requests, and the public queue.
+5. `/invite/:inviteCode` is a magic invite link issued by an operator and redirects to the participant session.
 6. `/:venueSlug` may remain temporarily as a read-only legacy venue page, but it links only to canonical event pages.
 7. Venue-scoped join, queue, and event-slug routes return 404 and do not redirect.
 8. There is no separate global `/events` route in this decision.
@@ -39,7 +39,7 @@ Rules:
 - show bounded sections for current public events, upcoming public events, and public venues;
 - include only events with `visibility=public`; never discover `unlisted` or `private` events;
 - keep `invite_required` events discoverable while clearly stating that joining requires the QR available at the venue;
-- use `/event/:eventPublicId` as the canonical destination for event details and participation;
+- use `/event/:eventPublicId` as the canonical destination for event details;
 - do not add public login, search, geolocation, or homepage realtime as part of this decision.
 
 ### `/@:handle`
@@ -57,30 +57,35 @@ Handles are public identity, not internal authorization boundaries. Backend visi
 
 ### `/event/:eventPublicId`
 
-Main public page for a concrete event.
+Informational public landing for a concrete event.
 
-Expected future behavior:
+Rules:
 
 - show event status and public info;
-- show join form when event access policy allows it;
-- show public queue when `publicQueueEnabled=true` and event status policy allows it;
-- track participant-visible state through participant cookie / request ownership;
-- refresh status, queue, `publicJoinEnabled`, `publicQueueEnabled`, and own request status after dashboard mutations.
-- submit only through this event-scoped page after status, visibility, public join, and participant access policy allow it.
+- show the venue, organizer, start time, and join availability;
+- link to `/event/:eventPublicId/session`;
+- do not render the join form, song fields, participant requests, or the live queue;
+- keep `invite_required` events visible when event visibility allows it, while explaining that joining requires the venue QR.
 
-### `/event/:eventPublicId/queue`
+### `/event/:eventPublicId/session`
 
-Canonical standalone, read-only public queue route for a concrete event.
+Participant app for a concrete event.
 
 Rules:
 
 - resolve the event only through `eventPublicId`, never through a venue slug;
-- allow direct access to `public` and `unlisted` events when `publicQueueEnabled=true`;
-- return the public not-found path for `private`, `draft`, `archived`, and `cancelled` events;
-- show a controlled unavailable state for `scheduled` events and for a disabled public queue;
-- show queue snapshots for `active`, `paused`, and `closed` events;
-- do not require participant access to read a public queue: `invite_required` controls submit, not queue visibility;
-- do not render submit, invite claim, or operator controls on the queue page.
+- use the existing participant cookie and `participant_event_access`;
+- show the join form only when backend submit policy allows it;
+- for `invite_required` without access, show `Zeskanuj QR w lokalu, aby dołączyć do sesji.` without song fields;
+- when public join is disabled or the event cannot accept submissions, show `Zgłoszenia są zamknięte`;
+- include own-request state and the public queue according to existing API policy;
+- use one event-scoped SSE connection for live queue and participant-state refresh;
+- use initial, reconnect, domain-event, manual, and mutation-success snapshot refreshes without cyclic polling.
+
+### `/event/:eventPublicId/queue`
+
+This standalone route returns the controlled public 404 path. The queue is part of
+`/event/:eventPublicId/session`, so there is no second live public queue surface or second EventSource lifecycle.
 
 ### `/invite/:inviteCode`
 
@@ -90,10 +95,10 @@ Expected future behavior:
 
 1. Validate invite code.
 2. If valid, grant participant access for the target event and/or set the participant cookie for that event.
-3. Redirect to `/event/:eventPublicId`.
+3. Redirect to `/event/:eventPublicId/session`.
 4. If invalid, expired, revoked, or already rotated, show a controlled invalid invite state.
 
-Invite links are not submit pages or stable event URLs. They are an access mechanism that can be rotated or revoked; after claim, participation continues on `/event/:eventPublicId`.
+Invite links are not submit pages or stable event URLs. They are an access mechanism that can be rotated or revoked; after claim, participation continues on `/event/:eventPublicId/session`.
 
 ## Legacy Routes
 
@@ -170,7 +175,7 @@ igraniewlochu
 
 Direct `/event/:eventPublicId` access and invite access are separate:
 
-- direct event URL can show public event information and queue according to public visibility policy;
+- direct event URL shows public event information according to public visibility policy;
 - invite link can grant participant access for the event;
 - invite code can be revoked or rotated without changing the event URL;
 - participant identity still uses anonymous participant cookie, not accounts;
@@ -193,7 +198,7 @@ Event visibility and join access are separate dimensions:
 Rules:
 
 - `publicJoinEnabled=false` blocks the join form even for invited or already joined participants.
-- `publicQueueEnabled=false` blocks public queue visibility according to existing public queue policy.
+- `publicQueueEnabled=false` blocks queue visibility inside the participant session according to existing public queue policy.
 - Event status still matters:
   - active can accept public submit when join is enabled and access policy allows it;
   - paused blocks submit but may keep queue visible;
@@ -205,7 +210,7 @@ Rules:
 Target realtime work should focus on these future surfaces:
 
 - `/@:handle` refreshes public event list / active event after event create, start, pause, resume, close, archive, and cancel.
-- `/event/:eventPublicId` refreshes:
+- `/event/:eventPublicId/session` refreshes:
   - event status;
   - queue snapshot;
   - `publicJoinEnabled`;
@@ -247,28 +252,30 @@ Realtime implementation should preserve the current safety lessons:
    - ensure `eventPublicId` is short, random, stable, and exposed in public DTOs;
    - keep internal UUID for dashboard and DB.
 4. Add `/event/:eventPublicId`:
-   - event detail;
-   - queue section;
+   - informational event detail;
+   - link to the participant session.
+5. Add `/event/:eventPublicId/session`:
    - join form state;
+   - queue section;
    - participant my-request tracking;
    - SSE-driven snapshot refresh for status and flags.
-5. Add invite model:
+6. Add invite model:
    - invite generation/rotation/revocation backend contract;
    - `/invite/:inviteCode` claim endpoint/page;
-   - redirect to `/event/:eventPublicId`.
+   - redirect to `/event/:eventPublicId/session`.
    - Future dashboard work: add a small invite management panel for revoke/rotate once the dashboard invite surface is stable.
    - Future access work: add explicit participant access revoke if operators need to remove already granted participant access.
-6. Remove legacy venue-first participant routes:
+7. Remove legacy venue-first participant routes:
    - keep only a temporary read-only `/:venueSlug` page;
    - return 404 for venue-scoped join, queue, and event-slug routes;
    - do not redirect through active-event lookup.
-7. Update QA playbook and release evidence templates for event-first public URLs.
-8. Only after the route migration, revisit realtime coverage for the new event-first pages.
+8. Update QA playbook and release evidence templates for event-first public URLs.
+9. Verify realtime coverage for the participant session.
 
 ## Non-goals
 
 - No `/@:handle` or `/venue/:venuePublicId` profile implementation.
-- No standalone `/event/:eventPublicId/queue` implementation in the routing cleanup.
+- No standalone `/event/:eventPublicId/queue`; the route returns 404.
 - No global `/events` directory.
 - No promotion of event slugs as primary public event URLs.
 - No participant accounts.

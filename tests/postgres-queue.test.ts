@@ -865,7 +865,7 @@ test("public invite claim sets participant cookie and returns event redirect wit
     assert.match(token, /^[A-Za-z0-9_-]{32,128}$/)
     assert.deepEqual(response.json(), {
       eventPublicId: ACTIVE_EVENT_PUBLIC_ID,
-      redirectTo: `/event/${ACTIVE_EVENT_PUBLIC_ID}`
+      redirectTo: `/event/${ACTIVE_EVENT_PUBLIC_ID}/session`
     })
     assert.equal(response.body.includes(ACTIVE_EVENT_ID), false)
     assert.equal(response.body.includes("inviteCode1"), false)
@@ -1088,7 +1088,7 @@ test("rotate invalidates old invite code and new code can be claimed", async () 
     assert.equal(rotatedInvite.json().invite.inviteUrl, `http://localhost:3000/invite/${newCode}`)
     assert.equal(oldClaim.statusCode, 404)
     assert.equal(newClaim.statusCode, 200)
-    assert.equal(newClaim.json().redirectTo, `/event/${ACTIVE_EVENT_PUBLIC_ID}`)
+    assert.equal(newClaim.json().redirectTo, `/event/${ACTIVE_EVENT_PUBLIC_ID}/session`)
     assert.equal(readAccessRows(db).length, 2)
   } finally {
     await app.close()

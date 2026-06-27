@@ -6,7 +6,6 @@ export type PublicEventPageState = {
   statusLabel: string
   submissionsLabel: string
   queueLabel: string
-  showQueueLink: boolean
 }
 
 export function getPublicEventPageState(detail: PublicEventDetail): PublicEventPageState {
@@ -15,8 +14,7 @@ export function getPublicEventPageState(detail: PublicEventDetail): PublicEventP
     venueLabel: detail.venue.name,
     statusLabel: eventStatusLabel(detail.event.status),
     submissionsLabel: detail.submissions.enabled ? "Zgloszenia sa otwarte" : submissionsClosedLabel(detail.submissions.reason),
-    queueLabel: detail.publicQueue.visible ? "Kolejka publiczna jest widoczna" : publicQueueHiddenLabel(detail.publicQueue.reason),
-    showQueueLink: detail.publicQueue.visible
+    queueLabel: detail.publicQueue.visible ? "Kolejka publiczna jest widoczna" : publicQueueHiddenLabel(detail.publicQueue.reason)
   }
 }
 
@@ -45,7 +43,7 @@ function submissionsClosedLabel(reason: string | undefined): string {
     return "Zgloszenia publiczne sa wylaczone"
   }
   if (reason === "ACCESS_REQUIRED") {
-    return "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu."
+    return "Zeskanuj QR w lokalu, aby dołączyć do sesji."
   }
 
   return "Zgloszenia sa zamkniete"
