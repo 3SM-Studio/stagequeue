@@ -147,7 +147,11 @@ export function PublicEventParticipantView({
 
       <section id="queue">
         {detail.publicQueue.visible && queue ? (
-          <PublicQueueView eventPublicId={eventPublicId} initialQueue={queue} />
+          <PublicQueueView
+            eventPublicId={eventPublicId}
+            initialQueue={queue}
+            onLifecycleEvent={refresh}
+          />
         ) : (
           <div className="panel state-panel">
             <p className="eyebrow">Kolejka</p>
