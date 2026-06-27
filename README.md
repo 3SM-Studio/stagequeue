@@ -2,7 +2,8 @@
 
 ## Lokalny Postgres i Drizzle
 
-Docelowy backend platformy bedzie oparty o PostgreSQL, Drizzle i migracje SQL. Legacy JSON-y w `data/events` oraz `data/imports` zostaja na razie jako material referencyjny MVP, ale nie sa targetowym storage dla kolejki ani katalogu.
+Backend platformy jest oparty o PostgreSQL, Drizzle i migracje SQL. Rootowe narzedzia CLI nadal moga uzywac
+lokalnych plikow w `data/events` i `data/imports`, ale nie sa one runtime storage aplikacji.
 
 Lokalna baza:
 
@@ -69,7 +70,9 @@ Skrypt uzywa `git archive` i zapisuje `poza-nuta-source.zip`, a potem uruchamia 
 
 ## Typecheck i docelowy dev workflow
 
-Root `pnpm typecheck` uruchamia teraz realny `tsc --noEmit` dla `packages/domain`, `packages/db`, `apps/api`, `packages/shared`, `apps/public-web` oraz `tsconfig.tests.json`. Dodatkowy `pnpm check:architecture` zostaje jako lekki custom check repo, ale nie zastępuje TypeScript compiler checku.
+Root `pnpm typecheck` uruchamia realny `tsc --noEmit` dla `packages/domain`, `packages/db`, `apps/api`,
+`packages/shared`, `apps/public-web`, `apps/dashboard-web` oraz `tsconfig.tests.json`. Dodatkowy
+`pnpm check:architecture` zostaje jako lekki custom check repo, ale nie zastępuje TypeScript compiler checku.
 
 Domyślne komendy idą w target architecture:
 
@@ -78,18 +81,9 @@ pnpm dev
 pnpm build
 ```
 
-`pnpm dev` uruchamia Fastify API (`apps/api`), Next.js public-web (`apps/public-web`) i Next.js dashboard-web (`apps/dashboard-web`) równolegle. `pnpm build` buduje teraz `public-web` oraz `dashboard-web`.
-
-Legacy prototype jest nadal dostępny jawnie:
-
-```bash
-pnpm dev:api:legacy
-pnpm dev:web:legacy
-pnpm build:web:legacy
-```
-
-`apps/web` oraz `apps/api/src/server.ts` zostają chwilowo jako legacy reference i coverage dla starego MVP. Nie są domyślnym kierunkiem rozwoju platformy.
-Legacy API nie jest production deployment target. Jesli zostaje uruchomione poza lokalnym/dev flow, musi byc jawnie zabezpieczone `API_ADMIN_TOKEN`.
+`pnpm dev` uruchamia Fastify API (`apps/api`), Next.js public-web (`apps/public-web`) i Next.js dashboard-web
+(`apps/dashboard-web`) rownolegle. `pnpm build` buduje `public-web` oraz `dashboard-web`. Fastify
+`apps/api/src/index.ts` jest jedynym API runtime entrypointem.
 
 Szybki check bez tworzenia ZIP-a:
 
@@ -186,9 +180,9 @@ Dodatkowe opcje:
 - `--pick <number>` wybiera konkretny wynik z top listy, numerowany od `1`.
 - `--dry-run` pokazuje, co zostaloby dodane, ale nie zapisuje zmian do pliku eventu.
 
-## Fastify API skeleton
+## Fastify API
 
-Nowy docelowy backend znajduje sie w `apps/api` i jest szkieletem Fastify pod Better Auth, permissions, route groups, SSE oraz operacje DB. To nie jest jeszcze implementacja domenowych endpointow kolejki ani organizacji.
+Backend znajduje sie w `apps/api` i uzywa Fastify, Better Auth, resource-level permissions, SSE oraz PostgreSQL.
 
 Uruchom lokalnego Postgresa i migracje:
 
@@ -203,13 +197,9 @@ Uruchom API:
 pnpm dev:api
 ```
 
-`pnpm dev:api` uruchamia `apps/api/src/index.ts` w watch mode przez natywne `node --watch`. Legacy API na `node:http` zostaje jako reference i mozna je uruchomic przez:
+`pnpm dev:api` uruchamia `apps/api/src/index.ts` w watch mode przez natywne `node --watch`.
 
-```bash
-pnpm dev:api:legacy
-```
-
-Nowy skeleton wystawia na tym etapie:
+API wystawia miedzy innymi:
 
 ```bash
 curl http://127.0.0.1:4321/health
@@ -219,7 +209,8 @@ curl http://127.0.0.1:4321/dashboard
 curl http://127.0.0.1:4321/platform
 ```
 
-`/health` sprawdza polaczenie z baza. Pozostale grupy tras sa placeholderami pod kolejne fazy. CORS jest allowlistowany do `PUBLIC_WEB_URL` i `DASHBOARD_WEB_URL`, cookies sa wlaczone pod przyszle sesje, a w development/test globalny rate limit moze dzialac in-memory.
+`/health` sprawdza polaczenie z baza. CORS jest allowlistowany do `PUBLIC_WEB_URL` i `DASHBOARD_WEB_URL`,
+sesje uzywaja cookies Better Auth, a w development/test globalny rate limit moze dzialac in-memory.
 
 ### Auth i closed beta
 
@@ -254,7 +245,7 @@ Better Auth zapisuje swoje dane w tabelach `auth_users`, `auth_sessions`, `auth_
 - user bez approval ma `status: "pending"` i nie ma dashboard access,
 - produkcyjny first-owner flow musi uzywac `PLATFORM_SETUP_TOKEN` i `/setup` w dashboardzie,
 - `BOOTSTRAP_PLATFORM_OWNER_EMAIL` jest tylko development/test-only; `NODE_ENV=production` z ta zmienna odmawia startu,
-- user z emailem rownym `BOOTSTRAP_PLATFORM_OWNER_EMAIL` moze nadal dostac idempotentnie role `platform_owner` i status `active` w dev/legacy flow.
+- user z emailem rownym `BOOTSTRAP_PLATFORM_OWNER_EMAIL` moze nadal dostac idempotentnie role `platform_owner` i status `active` w development/test.
 
 W produkcji cookies Better Auth maja dzialac jako secure httpOnly session cookies. Dla subdomen ustaw `COOKIE_DOMAIN=.poza-nuta.pl`; lokalnie `COOKIE_DOMAIN=localhost` albo puste ustawienie pozwala testowac dev flow.
 
@@ -340,134 +331,6 @@ pnpm smoke:api
 ```
 
 `smoke:api` uruchamia API w tle, czeka na `/health`, wypisuje wynik i zatrzymuje proces. `dev` oraz `start` sa long-running server commands i nie powinny byc traktowane jako checki konczace sie same.
-
-## Legacy lokalne API karaoke
-
-Ta sekcja opisuje prototypowe API na `node:http`, ktore zostaje tylko jako material referencyjny i kompatybilny runtime dla starego Vite MVP. Nie jest docelowym backendem platformy venue-first.
-Legacy API nie jest production deployment target, chyba ze zostanie jawnie zabezpieczone. W `NODE_ENV=production` wymagane jest `API_ADMIN_TOKEN`; bez niego legacy API odmawia startu, a brak albo zly bearer token na endpointach operatorskich zwraca `401`.
-
-API jest lokalnym, dev-first mostem pod przyszly frontend, QR i panel operatora. Dziala wylacznie na lokalnych JSON-ach: `data/imports/ising-songs.json` oraz `data/events/*.json`. API nie odpytuje iSing podczas wyszukiwania ani operacji kolejki.
-
-Aplikacja API znajduje sie w `apps/api`. Domain/core pozostaje tymczasowo w rootowym `src` (`src/queue`, `src/search`, `src/importers`) jako etap przejsciowy przed ewentualnym wydzieleniem `packages/domain` i `packages/shared`.
-
-Uruchomienie:
-
-```bash
-pnpm dev:api:legacy
-```
-
-`pnpm dev:api:legacy` dziala w watch mode przez natywne `node --watch`, wiec lokalny serwer API restartuje sie po zmianach kodu. Na tym etapie `nodemon` nie jest potrzebny. Jesli natywny watch Node okaze sie niewystarczajacy przy wiekszej strukturze repo, mozna pozniej rozwazyc `nodemon` albo `tsx`.
-
-API loguje lokalnie requesty w formacie `[api] <requestId> <method> <path> <status> <durationMs>ms`. Kazda odpowiedz ma header `X-Request-Id`, co pomaga powiazac blad z frontendu z logiem backendu. Domyslnie `API_LOG_LEVEL=info`; ustaw `API_LOG_LEVEL=silent`, jesli chcesz wyciszyc access logi. Logi nie powinny zawierac pelnych body requestow, tokenow ani naglowka `Authorization`.
-
-Widoki operatora i publicznej kolejki uzywaja SSE bez interval pollingu. Zeby logi zostaly czytelne, `API_LOG_LEVEL=info` ukrywa rutynowe access logi dla `OPTIONS`; bledy nadal sa logowane. Ustaw `API_LOG_LEVEL=debug`, jesli potrzebujesz glebszego debugowania CORS/preflight.
-
-Domyslnie serwer binduje do `127.0.0.1:4321`. Konfiguracja:
-
-```env
-API_HOST=127.0.0.1
-API_PORT=4321
-# Required when NODE_ENV=production for legacy API.
-API_ADMIN_TOKEN=
-API_LOG_LEVEL=info
-```
-
-Jesli port `4321` jest zajety, zamknij poprzedni proces API albo ustaw inny `API_PORT`.
-
-Git Bash/CMD:
-
-```bash
-netstat -ano | findstr :4321
-cmd.exe /c "taskkill /PID <PID> /F"
-```
-
-PowerShell:
-
-```powershell
-Get-NetTCPConnection -LocalPort 4321
-Stop-Process -Id <PID> -Force
-```
-
-Jesli `API_ADMIN_TOKEN` jest ustawiony, endpointy operatorskie wymagaja naglowka `Authorization: Bearer <token>`. W `NODE_ENV=production` token jest wymagany dla legacy API. Publiczne endpointy i endpoint zgloszenia requestu uczestnika nie wymagaja tokena.
-
-Health check:
-
-```bash
-curl http://127.0.0.1:4321/health
-```
-
-Lokalne wyszukiwanie, limitowane i bez zwracania pelnego katalogu:
-
-```bash
-curl "http://127.0.0.1:4321/api/search?q=krolowa%20lez"
-```
-
-Utworzenie eventu:
-
-```bash
-curl -X POST http://127.0.0.1:4321/api/events \
-  -H "Content-Type: application/json" \
-  -d "{\"id\":\"test-event\",\"name\":\"Poza Nutą Test\"}"
-```
-
-Zgloszenie requestu uczestnika po lokalnym `sourceSongId`; tytul, artysta i URL sa brane z lokalnego indeksu, nie z body:
-
-```bash
-curl -X POST http://127.0.0.1:4321/api/events/test-event/requests \
-  -H "Content-Type: application/json" \
-  -d "{\"singerName\":\"Michał\",\"songSource\":\"ising\",\"songSourceId\":\"9053\"}"
-```
-
-Na Windows/Git Bash polskie znaki wpisane bezposrednio w `curl -d "{...}"` moga zostac wyslane w zlym kodowaniu terminala. Do recznych testow z polskimi znakami preferuj pliki JSON zapisane jako UTF-8.
-
-`event.json`:
-
-```json
-{
-  "id": "api-smoke",
-  "name": "Poza Nutą API Smoke"
-}
-```
-
-`request.json`:
-
-```json
-{
-  "singerName": "Michał",
-  "songSource": "ising",
-  "songSourceId": "9053"
-}
-```
-
-```bash
-curl -X POST http://127.0.0.1:4321/api/events \
-  -H "Content-Type: application/json; charset=utf-8" \
-  --data-binary @event.json
-```
-
-```bash
-curl -X POST http://127.0.0.1:4321/api/events/api-smoke/requests \
-  -H "Content-Type: application/json; charset=utf-8" \
-  --data-binary @request.json
-```
-
-Publiczna kolejka:
-
-```bash
-curl http://127.0.0.1:4321/api/events/test-event/public-queue
-curl "http://127.0.0.1:4321/api/events/test-event/public-queue?hideSongTitles=true"
-```
-
-Kolejka operatora i akcje operatorskie:
-
-```bash
-curl http://127.0.0.1:4321/api/events/test-event/operator-queue
-curl -X POST http://127.0.0.1:4321/api/events/test-event/requests/<request-id>/approve
-curl -X POST http://127.0.0.1:4321/api/events/test-event/requests/<request-id>/start
-curl -X POST http://127.0.0.1:4321/api/events/test-event/done
-```
-
-Publiczny frontend, QR i panel operatora sa nastepnym etapem; tutaj jest tylko lokalne API nad istniejacym search i queue core.
 
 ## Public-web Next.js
 
@@ -671,63 +534,3 @@ select id, slug, status from events where slug = 'demo-karaoke';
 ```
 
 Bez prawdziwej sesji Google OAuth panel poprawnie pokaze stan logowania/braku dostepu. D2 nie dodaje auth bypassa do lokalnego QA.
-
-## Frontend MVP
-
-Frontend MVP jest cienkim klientem React/Vite do lokalnego API. Nie odpytuje iSing i nie zawiera jeszcze QR, logowania, AI ani finalnego designu.
-
-To jest legacy prototype reference. Pelny stary flow participant/operator/public wymaga prototypowego API:
-
-```bash
-pnpm dev:api:legacy
-pnpm dev:web:legacy
-```
-
-Docelowy rootowy dev workflow:
-
-```bash
-pnpm dev
-```
-
-`pnpm dev` uruchamia Fastify API, Next.js public-web i Next.js dashboard-web rownolegle w jednym terminalu przez `concurrently`. Logi sa prefiksowane jako `API`, `PUBLIC` i `DASHBOARD`, a zatrzymanie procesu konczy wszystkie serwery. `concurrently` sluzy tylko do lokalnego dev workflow.
-
-Adresy lokalne:
-
-- API: `http://127.0.0.1:4321`
-- Public-web: `http://127.0.0.1:3000`
-- Dashboard-web: `http://127.0.0.1:3001`
-- Legacy Vite web: `http://127.0.0.1:5173`
-
-Web dev server ma celowo staly port `5173` (`strictPort: true`). Jesli port `5173` jest zajety, zamknij poprzedni proces zamiast pozwalac Vite przejsc na `5174`, bo README, CORS i lokalne linki zakladaja `5173`.
-
-Docelowe serwery mozna nadal uruchamiac osobno:
-
-```bash
-pnpm dev:api
-pnpm dev:public
-pnpm dev:dashboard
-```
-
-Dla starego pelnego flow kolejkowego Vite uzyj `pnpm dev:api:legacy` oraz `pnpm dev:web:legacy`.
-
-Utworz event:
-
-```bash
-curl -X POST http://127.0.0.1:4321/api/events \
-  -H "Content-Type: application/json; charset=utf-8" \
-  -d "{\"id\":\"test-event\",\"name\":\"Poza Nutą Test\"}"
-```
-
-Adresy widokow:
-
-- participant: `http://127.0.0.1:5173/event/test-event`
-- public queue: `http://127.0.0.1:5173/event/test-event/public`
-- operator: `http://127.0.0.1:5173/event/test-event/operator`
-
-Konfiguracja frontendu:
-
-```env
-VITE_API_BASE_URL=http://127.0.0.1:4321
-```
-
-Participant view pozwala wpisac imie, wyszukac piosenke w lokalnym indeksie i wyslac pending request. Operator view pokazuje pending/approved/now/history i pozwala approve, reject, start, skip oraz done. Ten legacy Vite UI pobiera snapshot poczatkowy i pozwala na reczne odswiezenie; canonical public/dashboard UI korzysta z SSE.

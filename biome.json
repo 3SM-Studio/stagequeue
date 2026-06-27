@@ -11,8 +11,7 @@
       "!node_modules",
       "!dist",
       "!data/imports/*.json",
-      "!data/events/*.json",
-      "!apps/web/node_modules"
+      "!data/events/*.json"
     ]
   },
   "formatter": {

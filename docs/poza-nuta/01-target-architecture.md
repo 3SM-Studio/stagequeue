@@ -48,7 +48,7 @@ MUST:
 
 MUST NOT:
 
-- build target UI in legacy Vite app;
+- introduce a parallel Vite runtime for target UI;
 - move main business logic into Next.js route handlers;
 - treat JSON file storage as production storage;
 - use WebSocket infrastructure before bidirectional needs exist;

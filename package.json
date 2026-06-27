@@ -17,16 +17,12 @@
     "build:dashboard": "pnpm --filter @poza-nuta/dashboard-web build",
     "build:public": "pnpm --filter @poza-nuta/public-web build",
     "build:web": "pnpm build:public",
-    "build:web:legacy": "vite build --config apps/web/vite.config.ts",
     "check:architecture": "node --experimental-strip-types scripts/typecheck.mjs",
     "dev": "concurrently -k -n API,PUBLIC,DASHBOARD -c blue,magenta,green \"pnpm dev:api\" \"pnpm dev:public\" \"pnpm dev:dashboard\"",
     "ci:db-smoke": "pnpm --filter @poza-nuta/api ci:db-smoke",
     "dev:api": "pnpm --filter @poza-nuta/api dev",
-    "dev:api:legacy": "node --watch --experimental-strip-types apps/api/src/server.ts",
     "dev:dashboard": "pnpm --filter @poza-nuta/dashboard-web dev",
     "dev:public": "pnpm --filter @poza-nuta/public-web dev",
-    "dev:legacy": "concurrently -k -n API_LEGACY,WEB_LEGACY -c cyan,magenta \"pnpm dev:api:legacy\" \"pnpm dev:web:legacy\"",
-    "dev:web:legacy": "vite --config apps/web/vite.config.ts --host 127.0.0.1",
     "dev:worker": "echo \"apps/worker scaffold is present; worker process will be added in a later phase\"",
     "db:generate": "pnpm --filter @poza-nuta/db db:generate",
     "db:migrate": "pnpm --filter @poza-nuta/db db:migrate",
@@ -55,13 +51,7 @@
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^9.2.1",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.16"
-  },
-  "dependencies": {
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "typescript": "^6.0.3"
   }
 }
