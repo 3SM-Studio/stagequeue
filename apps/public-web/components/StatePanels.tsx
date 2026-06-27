@@ -27,14 +27,18 @@ export function InactiveQueuePanel({ venue }: { venue: Pick<Venue, "name" | "slu
 }
 
 export function PausedQueuePanel({ active }: { active: ActiveEventLookup }) {
+  const eventPublicId = active.activeEvent?.publicId
+
   return (
     <section className="panel state-panel">
       <p className="eyebrow">{active.venue.name}</p>
       <h1>Zgłoszenia są chwilowo wstrzymane.</h1>
       <p>Kolejka może być nadal widoczna, ale nowe piosenki nie są teraz przyjmowane.</p>
-      <Link className="button secondary" href={`/${active.venue.slug}/queue`}>
-        Zobacz kolejkę
-      </Link>
+      {eventPublicId ? (
+        <Link className="button secondary" href={`/event/${eventPublicId}`}>
+          Zobacz wydarzenie
+        </Link>
+      ) : null}
     </section>
   )
 }

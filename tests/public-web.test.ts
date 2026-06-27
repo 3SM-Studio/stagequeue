@@ -328,6 +328,41 @@ test("public-web reserved static slugs do not call the public venue API", async 
   }
 })
 
+test("legacy venue join queue and event-slug routes are hard not-found pages", () => {
+  const removedRouteFiles = [
+    "apps/public-web/app/[venueSlug]/join/page.tsx",
+    "apps/public-web/app/[venueSlug]/queue/page.tsx",
+    "apps/public-web/app/[venueSlug]/events/[eventSlug]/page.tsx",
+    "apps/public-web/app/[venueSlug]/events/[eventSlug]/join/page.tsx",
+    "apps/public-web/app/[venueSlug]/events/[eventSlug]/queue/page.tsx"
+  ]
+
+  for (const routeFile of removedRouteFiles) {
+    const source = readFileSync(routeFile, "utf8")
+    assert.match(source, /notFound\(\)/, `${routeFile} should return Next.js not found`)
+    assert.doesNotMatch(source, /\bredirect\(|<Link|fetch\(|getVenue|getActiveEvent|PublicJoinView|PublicQueueView/)
+  }
+})
+
+test("legacy venue page links its active event only through eventPublicId", () => {
+  const source = readFileSync("apps/public-web/app/[venueSlug]/page.tsx", "utf8")
+  const statePanelsSource = readFileSync("apps/public-web/components/StatePanels.tsx", "utf8")
+
+  assert.match(source, /href=\{`\/event\/\$\{activeEvent\.publicId\}`\}/)
+  assert.doesNotMatch(source, /venue\.slug}\/(?:join|queue)/)
+  assert.doesNotMatch(statePanelsSource, /active\.venue\.slug}\/queue/)
+})
+
+test("canonical event and invite routes remain event-scoped", () => {
+  const eventPageSource = readFileSync("apps/public-web/app/event/[eventPublicId]/page.tsx", "utf8")
+  const inviteRouteSource = readFileSync("apps/public-web/app/invite/[inviteCode]/route.ts", "utf8")
+
+  assert.match(eventPageSource, /getPublicEventPageData\(eventPublicId/)
+  assert.match(eventPageSource, /<PublicEventParticipantView eventPublicId=\{eventPublicId\}/)
+  assert.match(inviteRouteSource, /claimPublicInviteServer\(inviteCode/)
+  assert.match(inviteRouteSource, /NextResponse\.redirect\(new URL\(claim\.body\.redirectTo, request\.url\)\)/)
+})
+
 test("public-web validates venue API responses", () => {
   assert.equal(assertVenueResponse(validVenueResponse()).venue.name, "Klub X")
   assert.throws(() => assertVenueResponse({ venue: { id: "venue-1" } }), /Invalid public API response: venue/)
@@ -884,6 +919,7 @@ test("public-web discovery homepage exposes sections safe CTAs and empty states"
     assert.equal(source.includes(emptyState), true)
   }
   assert.equal(source.includes("Zobacz wydarzenie"), true)
+  assert.match(source, /href=\{`\/event\/\$\{event\.eventPublicId\}`\}/)
   assert.equal(source.includes("Dodaj piosenkę"), false)
   assert.equal(source.includes("Venue-first MVP"), false)
 })

@@ -29,17 +29,20 @@ pnpm dev
 Lokalne URL-e:
 
 ```txt
-Participant venue: http://localhost:3000/demo-klub
-Participant join:  http://localhost:3000/demo-klub/join
-Public queue:      http://localhost:3000/demo-klub/queue
+Public discovery:  http://localhost:3000/
+Participant event: http://localhost:3000/event/<eventPublicId>
+Legacy venue read: http://localhost:3000/demo-klub
 Dashboard events:  http://localhost:3001/dashboard/events
 ```
 
-Jesli potrzebujesz event ID demo:
+Jesli potrzebujesz identyfikatorow eventu demo:
 
 ```sql
-select id, slug, status from events where slug = 'demo-karaoke';
+select id, public_id, slug, status from events where slug = 'demo-karaoke';
 ```
+
+Legacy URL-e `/demo-klub/join`, `/demo-klub/queue` oraz `/:venueSlug/events/:eventSlug*` maja zwracac 404.
+Public queue jest obecnie sekcja canonical event page; osobny `/event/:eventPublicId/queue` pozostaje przyszla trasa.
 
 ## 2. Accounts and Sessions
 
@@ -69,9 +72,9 @@ select id, slug, status from events where slug = 'demo-karaoke';
 
 ## 4. Participant Join Flow
 
-1. Otworz `http://localhost:3000/demo-klub`.
-2. Przejdz do `http://localhost:3000/demo-klub/join`.
-3. Sprawdz, ze formularz jest widoczny tylko dla aktywnego eventu z wlaczonym public join.
+1. Otworz `http://localhost:3000/event/<eventPublicId>`.
+2. Sprawdz, ze strona pokazuje wlasciwy event oraz lokal bez ujawniania internal event UUID.
+3. Sprawdz, ze formularz jest widoczny tylko dla aktywnego eventu z wlaczonym public join i dozwolonym access policy.
 4. Wyslij pusty formularz i potwierdz czytelne bledy walidacji.
 5. Wyslij poprawny request:
    - singer name;
@@ -88,9 +91,12 @@ Poczekaj na zatwierdzenie prowadzacego.
 8. Sprawdz cooldown: szybki kolejny submit powinien dac czytelny komunikat limitu.
 9. Sprawdz limit aktywnych requestow uczestnika: `pending`, `approved` i `now` licza sie do limitu; `done`, `rejected`, `skipped` nie powinny.
 10. Sprawdz `my-requests` tracking:
-    - po approve komunikat zmienia sie na zatwierdzony;
-    - po start komunikat zmienia sie na "teraz twoja kolej";
-    - po reject/skip/done komunikat pokazuje koncowy status.
+     - po approve komunikat zmienia sie na zatwierdzony;
+     - po start komunikat zmienia sie na "teraz twoja kolej";
+     - po reject/skip/done komunikat pokazuje koncowy status.
+11. Dla `joinAccessMode=invite_required` sprawdz, ze bez claim formularz jest zablokowany.
+12. Otworz `/invite/<inviteCode>`, potwierdz redirect do `/event/<eventPublicId>` i ponow submit.
+13. Potwierdz, ze `publicJoinEnabled=false` blokuje submit takze po claim.
 
 ## 5. Operator Queue Flow
 

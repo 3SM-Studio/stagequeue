@@ -40,11 +40,8 @@ export default async function VenuePage({ params }: VenuePageProps) {
           </p>
           {activeEvent ? (
             <div className="actions">
-              <Link className="button primary" href={`/${venue.slug}/join`}>
-                Zgłoś piosenkę
-              </Link>
-              <Link className="button secondary" href={`/${venue.slug}/queue`}>
-                Zobacz kolejkę
+              <Link className="button primary" href={`/event/${activeEvent.publicId}`}>
+                Zobacz wydarzenie
               </Link>
             </div>
           ) : null}
