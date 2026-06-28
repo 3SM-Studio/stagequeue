@@ -48,12 +48,12 @@ Security notes / accepted risks:
 | Smoke check | Expected result | Actual result | Pass/Fail | Evidence / notes |
 |---|---|---|---|---|
 | API `/health` | API OK, DB OK |  |  |  |
-| Public web loads | Public venue/home loads |  |  |  |
+| Public web loads | Discovery and event landing load |  |  |  |
 | Dashboard web loads | Dashboard route loads |  |  |  |
 | Dashboard login | Google/Better Auth login works |  |  |  |
 | `GET /me` | Correct auth/access state |  |  |  |
 | DB connection | App can query DB |  |  |  |
-| Public venue lookup | Visible venue loads |  |  |  |
+| Participant session | `/event/:eventPublicId/session` loads |  |  |  |
 | Operator queue page | Event queue loads |  |  |  |
 
 Commands / URLs used:
@@ -71,7 +71,7 @@ Use one row per scenario from the live karaoke manual QA playbook.
 | Pre-flight complete | Required checks and env ready |  |  |  |  |
 | Accounts/sessions separated | Operator auth and participant anon session separated |  |  |  |  |
 | Event setup valid | Venue/org/event visible and active as expected |  |  |  |  |
-| Participant join validation | Missing fields show readable validation errors |  |  |  |  |
+| Participant session validation | Missing fields show readable validation errors |  |  |  |  |
 | Participant submit | Request created as pending |  |  |  |  |
 | Operator pending visibility | Pending appears in dashboard without F5 |  |  |  |  |
 | Approve/start/done flow | Request moves through approved/now/done |  |  |  |  |
@@ -85,7 +85,7 @@ Use one row per scenario from the live karaoke manual QA playbook.
 
 | Flow step | Evidence captured | Pass/Fail | Notes |
 |---|---|---|---|
-| Participant submit from public join | Screenshot / request ID / log line |  |  |
+| Participant submit from event session | Screenshot / request ID / log line |  |  |
 | Operator queue update via SSE | Screenshot before/after |  |  |
 | Approve request | Screenshot / API request ID |  |  |
 | Start request | Screenshot / public status update |  |  |
@@ -93,8 +93,8 @@ Use one row per scenario from the live karaoke manual QA playbook.
 | Reject request | Screenshot / participant status |  |  |
 | Skip request | Screenshot / queue state |  |  |
 | Public queue visibility | Screenshot of public queue |  |  |
-| Lifecycle pause | Public join blocked |  |  |
-| Lifecycle resume | Public join restored |  |  |
+| Lifecycle pause | Session submit blocked |  |  |
+| Lifecycle resume | Session submit restored |  |  |
 | Lifecycle close | Submit stopped and queue state correct |  |  |
 
 Key request IDs / logs:
@@ -181,7 +181,7 @@ Run these after deployment or demo handoff.
 | API health | `/health` OK and DB OK |  |  |  |
 | Error logs | No new critical errors |  |  |  |
 | Auth logs | No unexpected login/setup errors |  |  |  |
-| Public web | Venue/join/queue reachable |  |  |  |
+| Public web | Discovery, event landing, and participant session reachable; standalone queue returns 404 |  |  |  |
 | Dashboard web | Dashboard/events/queue reachable |  |  |  |
 | Live queue flow | One smoke participant request works |  |  |  |
 | SSE / reconnect | Updates arrive and reconnect restores live state |  |  |  |

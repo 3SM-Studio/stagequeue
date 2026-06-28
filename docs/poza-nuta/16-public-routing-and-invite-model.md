@@ -1,6 +1,8 @@
 # Public Routing and Invite Model
 
-Status: accepted product/architecture decision, partially implemented. The public participant flow is event-first; legacy venue-scoped join and queue routes now return 404.
+Status: accepted and implemented for the event landing/session participant flow. The future
+`/@:handle` profile model remains unimplemented. Legacy venue-scoped join/queue routes and the
+standalone event queue route return 404.
 
 ## Problem
 
@@ -238,39 +240,23 @@ Realtime implementation should preserve the current safety lessons:
 - Handle lookup must be case-insensitive and protected against reserved/static path collisions.
 - The temporary read-only `/:venueSlug` page must keep reserved slug guards for `sw.js`, `_next`, assets, manifest, robots, sitemap, and similar static paths.
 
-## Implementation Plan W Małych Taskach
+## Implementation Status
 
-1. Data model decision for handles:
-   - define owner type: venue, organization, or brand;
-   - add `handleDisplay` and `handleNormalized`;
-   - add case-insensitive uniqueness and reserved handle rules.
-2. Add public profile route:
-   - API lookup for `/@:handle`;
-   - public-web route `/@:handle`;
-   - no global event catalog.
-3. Add event public ID contract:
-   - ensure `eventPublicId` is short, random, stable, and exposed in public DTOs;
-   - keep internal UUID for dashboard and DB.
-4. Add `/event/:eventPublicId`:
-   - informational event detail;
-   - link to the participant session.
-5. Add `/event/:eventPublicId/session`:
-   - join form state;
-   - queue section;
-   - participant my-request tracking;
-   - SSE-driven snapshot refresh for status and flags.
-6. Add invite model:
-   - invite generation/rotation/revocation backend contract;
-   - `/invite/:inviteCode` claim endpoint/page;
-   - redirect to `/event/:eventPublicId/session`.
-   - Future dashboard work: add a small invite management panel for revoke/rotate once the dashboard invite surface is stable.
-   - Future access work: add explicit participant access revoke if operators need to remove already granted participant access.
-7. Remove legacy venue-first participant routes:
-   - keep only a temporary read-only `/:venueSlug` page;
-   - return 404 for venue-scoped join, queue, and event-slug routes;
-   - do not redirect through active-event lookup.
-8. Update QA playbook and release evidence templates for event-first public URLs.
-9. Verify realtime coverage for the participant session.
+Implemented:
+
+- short, random, stable `eventPublicId` in public event URLs;
+- `/event/:eventPublicId` informational landing;
+- `/event/:eventPublicId/session` participant app with submit, own requests, public queue, and event-scoped SSE;
+- `/invite/:inviteCode` claim followed by redirect to the participant session;
+- controlled 404 for standalone event queue and venue-scoped join/queue/event-slug routes;
+- temporary read-only `/:venueSlug` page linking only to canonical event landings.
+
+Future work:
+
+- decide whether public handles belong to a venue, organization, or brand;
+- add `handleDisplay` and case-insensitive `handleNormalized` only with a dedicated data-model task;
+- add API lookup and public-web route for `/@:handle`;
+- add explicit participant access revoke only if the product requires revoking previously granted access.
 
 ## Non-goals
 

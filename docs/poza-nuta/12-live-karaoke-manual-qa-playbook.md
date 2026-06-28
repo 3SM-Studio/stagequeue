@@ -237,7 +237,6 @@ Akceptowalne ostrzezenia, jesli sa opisane w release notes:
 - lista eventow w dashboardzie nie jest widokiem live i odswieza sie tylko recznie albo jednorazowo po focus/visibility;
 - opoznienie statusu public join zalezy od dostarczenia SSE albo reconnectu;
 - manualny refresh jest potrzebny po odzyskaniu sieci;
-- event-specific public slug routes sa nadal placeholderami, jesli nie sa czescia release.
 
 Evidence do zebrania:
 
