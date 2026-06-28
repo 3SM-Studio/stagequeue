@@ -31,7 +31,23 @@ export function PublicEventSessionView({
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const inFlightRefresh = useRef<Promise<void> | null>(null)
   const inFlightParticipantRefresh = useRef<Promise<void> | null>(null)
+  const inFlightMyRequests = useRef<Promise<PublicMyRequest[]> | null>(null)
   const state = getPublicEventPageState(detail)
+
+  const loadMyRequests = useCallback(() => {
+    if (inFlightMyRequests.current) {
+      return inFlightMyRequests.current
+    }
+
+    const request = getMyRequestsByEventPublicId(eventPublicId)
+      .then((response) => response.requests)
+      .finally(() => {
+        inFlightMyRequests.current = null
+      })
+
+    inFlightMyRequests.current = request
+    return request
+  }, [eventPublicId])
 
   const refresh = useCallback(async () => {
     if (inFlightRefresh.current) {
@@ -42,12 +58,12 @@ export function PublicEventSessionView({
     const request = Promise.all([
       getPublicEventDetail(eventPublicId),
       detail.publicQueue.visible ? getPublicQueue(eventPublicId).catch(() => null) : Promise.resolve(null),
-      getMyRequestsByEventPublicId(eventPublicId)
+      loadMyRequests()
     ])
       .then(([nextDetail, nextQueue, nextMyRequests]) => {
         setDetail(nextDetail)
         setQueue(nextQueue)
-        setMyRequests(nextMyRequests.requests)
+        setMyRequests(nextMyRequests)
         setRefreshError(null)
       })
       .catch(() => {
@@ -60,7 +76,7 @@ export function PublicEventSessionView({
 
     inFlightRefresh.current = request
     return request
-  }, [detail.publicQueue.visible, eventPublicId])
+  }, [detail.publicQueue.visible, eventPublicId, loadMyRequests])
 
   const refreshParticipantState = useCallback(async () => {
     if (inFlightParticipantRefresh.current) {
@@ -69,11 +85,11 @@ export function PublicEventSessionView({
 
     const request = Promise.all([
       getPublicEventDetail(eventPublicId),
-      getMyRequestsByEventPublicId(eventPublicId)
+      loadMyRequests()
     ])
       .then(([nextDetail, nextMyRequests]) => {
         setDetail(nextDetail)
-        setMyRequests(nextMyRequests.requests)
+        setMyRequests(nextMyRequests)
         setRefreshError(null)
       })
       .catch(() => {
@@ -85,11 +101,17 @@ export function PublicEventSessionView({
 
     inFlightParticipantRefresh.current = request
     return request
-  }, [eventPublicId])
+  }, [eventPublicId, loadMyRequests])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    void loadMyRequests()
+      .then((nextMyRequests) => {
+        setMyRequests(nextMyRequests)
+      })
+      .catch(() => {
+        setRefreshError("Nie udało się odświeżyć zgłoszeń uczestnika.")
+      })
+  }, [loadMyRequests])
 
   return (
     <main className="page-shell">

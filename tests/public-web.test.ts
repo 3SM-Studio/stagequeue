@@ -307,8 +307,10 @@ test("public-web venue loader handles inactive state", async () => {
 test("public-web event session loader forwards participant cookie to event detail", async () => {
   const previousFetch = globalThis.fetch;
   let eventDetailCookie: string | undefined;
+  const requestedPaths: string[] = [];
   globalThis.fetch = async (input, init) => {
     const url = String(input);
+    requestedPaths.push(new URL(url).pathname);
     const headers = init?.headers as Record<string, string> | undefined;
     if (url.endsWith("/public/events/ka2Md-d1das")) {
       eventDetailCookie = headers?.cookie;
@@ -331,6 +333,14 @@ test("public-web event session loader forwards participant cookie to event detai
 
     assert.equal(data.kind, "ready");
     assert.equal(eventDetailCookie, "pn_participant=participant-token");
+    assert.deepEqual(requestedPaths, [
+      "/public/events/ka2Md-d1das",
+      "/public/events/ka2Md-d1das/queue",
+    ]);
+    if (data.kind === "ready") {
+      assert.equal(data.detail.event.publicId, "ka2Md-d1das");
+      assert.equal(data.queue?.event?.publicId, "ka2Md-d1das");
+    }
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -868,6 +878,7 @@ test("public-web validates invite claim API responses", () => {
 
 test("public-web queue refetch helper reacts to queue.updated", () => {
   assert.equal(shouldRefetchQueue("queue.updated"), true);
+  assert.equal(shouldRefetchQueue("request.created"), true);
   assert.equal(shouldRefetchQueue("request.approved"), true);
   assert.equal(shouldRefetchQueue("connected"), false);
 });
@@ -877,6 +888,7 @@ test("public queue stream uses one event source and refetches after events and r
   const statuses: string[] = [];
   const eventTypes: string[] = [];
   let factoryCalls = 0;
+  let connectedCount = 0;
   let openCount = 0;
   let refetchCount = 0;
   let requestedUrl = "";
@@ -888,6 +900,9 @@ test("public queue stream uses one event source and refetches after events and r
       requestedUrl = url;
       withCredentials = init.withCredentials;
       return source;
+    },
+    onConnected: () => {
+      connectedCount += 1;
     },
     onEvent: (eventType) => eventTypes.push(eventType),
     onOpen: () => {
@@ -904,7 +919,7 @@ test("public queue stream uses one event source and refetches after events and r
   source.onerror?.(new Event("error"));
   source.emit("connected");
   source.onerror?.(new Event("error"));
-  source.emit("request.approved");
+  source.emit("request.created");
   source.open();
 
   assert.equal(factoryCalls, 1);
@@ -913,9 +928,10 @@ test("public queue stream uses one event source and refetches after events and r
     "http://localhost:4321/public/events/ka2Md-d1das/stream",
   );
   assert.equal(withCredentials, true);
-  assert.equal(refetchCount, 3);
+  assert.equal(refetchCount, 4);
+  assert.equal(connectedCount, 1);
   assert.equal(openCount, 2);
-  assert.deepEqual(eventTypes, ["request.approved"]);
+  assert.deepEqual(eventTypes, ["request.created"]);
   assert.deepEqual(statuses, [
     "connecting",
     "connected",
@@ -954,7 +970,22 @@ test("participant session uses canonical public queue stream lifecycle and visib
     eventPageSource,
     /onRealtimeRefresh=\{refreshParticipantState\}/,
   );
+  assert.match(source, /onConnected: onRealtimeRefresh/);
   assert.match(eventPageSource, /requests=\{myRequests\}/);
+
+  const mountEffect = eventPageSource.slice(
+    eventPageSource.indexOf("useEffect(() =>"),
+    eventPageSource.indexOf("return (", eventPageSource.indexOf("useEffect(() =>")),
+  );
+  assert.match(mountEffect, /void loadMyRequests\(\)/);
+  assert.doesNotMatch(
+    mountEffect,
+    /getPublicEventDetail|getPublicQueue|void refresh\(\)/,
+  );
+  assert.match(
+    eventPageSource,
+    /onClick=\{\(\) => void refresh\(\)\}/,
+  );
 });
 
 test("public-web join refetch helper reacts to lifecycle and queue events", () => {
@@ -1122,6 +1153,24 @@ test("public-web invite-required state renders QR guidance instead of JoinForm",
     /Zeskanuj QR w lokalu, aby dołączyć do sesji\./,
   );
   assert.doesNotMatch(accessRequiredBranch, /<JoinForm/);
+});
+
+test("public-web closed session state does not render JoinForm", () => {
+  const source = readFileSync(
+    "apps/public-web/components/PublicEventSessionView.tsx",
+    "utf8",
+  );
+  const accessRequiredIndex = source.indexOf(
+    'detail.submissions.reason === "ACCESS_REQUIRED"',
+  );
+  const closedBranchStart = source.indexOf(") : (", accessRequiredIndex);
+  const closedBranch = source.slice(
+    closedBranchStart,
+    source.indexOf("</section>", closedBranchStart),
+  );
+
+  assert.match(closedBranch, /Zgłoszenia są zamknięte/);
+  assert.doesNotMatch(closedBranch, /<JoinForm/);
 });
 
 test("public-web join disabled stays disabled even for invite-required event", () => {

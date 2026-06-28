@@ -38,6 +38,7 @@ export function PublicQueueView({
       eventSourceFactory: (url, init) => new EventSource(url, init),
       ...(onRealtimeRefresh
         ? {
+            onConnected: onRealtimeRefresh,
             onEvent: onRealtimeRefresh,
             onOpen: onRealtimeRefresh
           }

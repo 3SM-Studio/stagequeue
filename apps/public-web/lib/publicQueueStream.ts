@@ -16,6 +16,7 @@ export type PublicQueueEventSourceFactory = (
 
 export function createPublicQueueStream({
   eventSourceFactory,
+  onConnected,
   onEvent,
   onOpen,
   onRefetch,
@@ -23,6 +24,7 @@ export function createPublicQueueStream({
   streamUrl
 }: {
   eventSourceFactory: PublicQueueEventSourceFactory
+  onConnected?: () => void
   onEvent?: (eventType: string) => void
   onOpen?: () => void
   onRefetch: () => void
@@ -38,7 +40,11 @@ export function createPublicQueueStream({
     onRefetch()
   }
   eventSource.onerror = () => onStatusChange("reconnecting")
-  eventSource.addEventListener("connected", () => onStatusChange("connected"))
+  eventSource.addEventListener("connected", () => {
+    onStatusChange("connected")
+    onConnected?.()
+    onRefetch()
+  })
 
   for (const eventType of queueRefreshEvents) {
     eventSource.addEventListener(eventType, () => {
