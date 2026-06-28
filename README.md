@@ -397,9 +397,10 @@ venue-scoped join ani queue.
 
 Public submit uzywa anonimowego cookie `pn_participant`. Uczestnik nie zaklada konta, token nie trafia do response body, a baza zapisuje tylko hash w `song_requests.participant_token_hash`. `PARTICIPANT_TOKEN_SECRET` sluzy do HMAC-SHA-256; jesli nie jest ustawiony, API uzywa `AUTH_SECRET` jako fallback. Dodatkowe limity antyspamowe: maksymalnie `PUBLIC_REQUEST_MAX_ACTIVE_PER_PARTICIPANT` aktywne requesty (`pending`, `approved`, `now`) per event oraz cooldown `PUBLIC_REQUEST_COOLDOWN_SECONDS` sekund per participant/event. Dotychczasowy IP+event rate limit zostaje jako fallback.
 
-`/event/[eventPublicId]` pobiera event detail, queue i requesty uczestnika przez event-scoped API oraz linkuje
-do canonical read-only queue page, gdy kolejka jest publiczna. Backend pozostaje source of truth dla visibility,
-lifecycle, `publicJoinEnabled`, `publicQueueEnabled`, `joinAccessMode` i `participant_event_access`.
+`/event/[eventPublicId]` pobiera public event detail i renderuje informacyjny landing.
+`/event/[eventPublicId]/session` pobiera event detail, kolejke i requesty uczestnika przez event-scoped API.
+Backend pozostaje source of truth dla visibility, lifecycle, `publicJoinEnabled`, `publicQueueEnabled`,
+`joinAccessMode` i `participant_event_access`.
 
 ## Dashboard-web MVP foundation
 
@@ -498,13 +499,13 @@ POST  /dashboard/events/:eventId/cancel
 Panel pozwala tez wlaczyc albo wylaczyc `publicJoinEnabled` i `publicQueueEnabled`. Public submit jest traktowany jako dostepny tylko dla eventu `active` z wlaczonym public join; public queue w dashboardowym modelu widocznosci jest traktowana jako live dla `active` albo `paused` z wlaczonym public queue. Backend i public API pozostaja zrodlem prawdy.
 
 D4.1 historycznie dodalo lifecycle realtime dla venue-first join. Ten URL zostal usuniety; canonical participant flow
-dziala teraz na `/event/[eventPublicId]` i korzysta z event-scoped API.
+dziala teraz na `/event/[eventPublicId]/session` i korzysta z event-scoped API.
 
-D4.2/P0 utwardza lifecycle controls przed connection starvation i wiszacymi fetchami. Strona operator queue nie otwiera juz dashboard SSE jako krytycznego kanalu; lifecycle action wykonuje POST/PATCH z timeoutem, po sukcesie robi deterministyczny refetch event detail + operator queue, a przy bledzie zawsze odblokowuje przyciski. Lista `/dashboard/events` uzywa bezpiecznego refreshu po focus/visibility zamiast streamow per event. Canonical public queue korzysta z event-scoped streamu. Stabilnosc akcji operatora ma priorytet nad idealnym realtime listy.
+D4.2/P0 utwardza lifecycle controls przed connection starvation i wiszacymi fetchami. Strona operator queue nie otwiera juz dashboard SSE jako krytycznego kanalu; lifecycle action wykonuje POST/PATCH z timeoutem, po sukcesie robi deterministyczny refetch event detail + operator queue, a przy bledzie zawsze odblokowuje przyciski. Lista `/dashboard/events` uzywa bezpiecznego refreshu po focus/visibility zamiast streamow per event. Public queue wewnatrz participant session korzysta z event-scoped streamu. Stabilnosc akcji operatora ma priorytet nad idealnym realtime listy.
 
 D4.4 dodaje safe refresh UX dla `/dashboard/events` bez EventSource per event. Lista ma reczny przycisk `Odswiez`, timestamp ostatniego odswiezenia, non-fatal error bez ukrywania starej listy oraz jednorazowy refresh po focus/visibility z in-flight guardem. Nie jest widokiem live i nie uruchamia interval pollingu. Jesli bedzie potrzebny prawdziwy realtime listy, follow-up to RT1: pojedynczy `/dashboard/events/stream` albo `/dashboard/stream`, nie stream per event.
 
-D4.5 domyka status propagation miedzy public join i dashboard operator queue. `/dashboard/events/:eventId/queue` ma event-scoped SSE, reczny przycisk `Odswiez kolejke`, non-fatal blad refreshu oraz jednorazowy focus/visibility refresh; nie ma interval pollingu. Canonical event page sledzi status wlasnego zgloszenia przez `GET /public/events/:eventPublicId/my-requests`; endpoint uzywa cookie `pn_participant`, filtruje po hashu participant tokena, nie przyjmuje tokena w query/body i nie zwraca cudzych requestow ani plaintext tokena.
+D4.5 domyka status propagation miedzy participant session i dashboard operator queue. `/dashboard/events/:eventId/queue` ma event-scoped SSE, reczny przycisk `Odswiez kolejke`, non-fatal blad refreshu oraz jednorazowy focus/visibility refresh; nie ma interval pollingu. Participant session sledzi status wlasnego zgloszenia przez `GET /public/events/:eventPublicId/my-requests`; endpoint uzywa cookie `pn_participant`, filtruje po hashu participant tokena, nie przyjmuje tokena w query/body i nie zwraca cudzych requestow ani plaintext tokena.
 
 D5 dodaje minimalny flow tworzenia wydarzenia bez pelnego CRUD. `/dashboard/events` ma akcje `Nowe wydarzenie`, a `/dashboard/events/new` pobiera `GET /dashboard/venues`, pokazuje wybor lokalu, nazwe, slug, status `draft|scheduled|active`, opcjonalne daty oraz flagi `publicJoinEnabled` i `publicQueueEnabled`. Submit uzywa `POST /dashboard/events` z `credentials: include` i po sukcesie kieruje do `/dashboard/events/:eventId/queue`. Platform owner ma MVP support/admin mozliwosc tworzenia eventu dla dostepnego lokalu, a konflikt sluga jest mapowany na kontrolowany `409 EVENT_SLUG_CONFLICT`. Seed demo nie jest juz jedynym sposobem posiadania eventu, ale pelny CRUD eventow/lokali/organizacji, staff assignment UI i tworzenie venue pozostaja odroczone.
 

@@ -1,5 +1,12 @@
 ## Phase 11 hardening checklist
 
+> Status: superseded historical checklist. Keep this file as implementation history, not as
+> current routing guidance. Venue-first participant URLs and event-slug placeholders below were
+> replaced by the event-first model in `docs/poza-nuta/16-public-routing-and-invite-model.md`.
+> Current routes are `/event/:eventPublicId` (landing),
+> `/event/:eventPublicId/session` (participant app), and `/invite/:inviteCode` (access claim);
+> standalone `/event/:eventPublicId/queue` and venue-scoped join/queue routes return 404.
+
 ### P0 — blockers before production demo
 
 - [ ] Remove generated artifacts from package/repo:

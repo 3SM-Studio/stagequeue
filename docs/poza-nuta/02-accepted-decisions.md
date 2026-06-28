@@ -16,7 +16,10 @@ poza-nuta.pl
 api.poza-nuta.pl
 ```
 
-Public URLs are venue based.
+The original ADR note used venue-based public URLs. The domain separation remains accepted,
+but that URL shape is superseded by
+`16-public-routing-and-invite-model.md`. The current participant flow uses
+`/event/:eventPublicId`, `/event/:eventPublicId/session`, and `/invite/:inviteCode`.
 
 ## ADR-003 — Next.js for public and dashboard apps
 
