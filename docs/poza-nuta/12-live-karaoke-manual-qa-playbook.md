@@ -30,7 +30,8 @@ Lokalne URL-e:
 
 ```txt
 Public discovery:  http://localhost:3000/
-Participant event: http://localhost:3000/event/<eventPublicId>
+Event landing:     http://localhost:3000/event/<eventPublicId>
+Participant app:   http://localhost:3000/event/<eventPublicId>/session
 Legacy venue read: http://localhost:3000/demo-klub
 Dashboard events:  http://localhost:3001/dashboard/events
 ```
@@ -75,29 +76,49 @@ Informacyjny landing jest pod `/event/:eventPublicId`, a participant app z kolej
 
 1. Otworz `http://localhost:3000/event/<eventPublicId>`.
 2. Sprawdz, ze landing pokazuje wlasciwy event oraz lokal bez formularza, kolejki i internal event UUID.
-3. Przejdz do `/event/<eventPublicId>/session` i sprawdz, ze formularz jest widoczny tylko dla aktywnego eventu z wlaczonym public join i dozwolonym access policy.
-4. Wyslij pusty formularz i potwierdz czytelne bledy walidacji.
-5. Wyslij poprawny request:
+3. Sprawdz, ze CTA prowadzi do `/event/<eventPublicId>/session`, a landing nie linkuje do standalone `/queue`.
+4. Przejdz do `/event/<eventPublicId>/session` i sprawdz, ze formularz jest widoczny tylko dla aktywnego eventu z wlaczonym public join i dozwolonym access policy.
+5. Wyslij pusty formularz i potwierdz czytelne bledy walidacji.
+6. Wyslij poprawny request:
    - singer name;
    - song title;
    - song artist;
    - opcjonalna notatka, jesli UI ja pokazuje.
-6. Po submit oczekuj komunikatu:
+7. Po submit oczekuj komunikatu:
 
 ```txt
 Poczekaj na zatwierdzenie prowadzacego.
 ```
 
-7. Potwierdz, ze request trafia do backendu jako `pending`.
-8. Sprawdz cooldown: szybki kolejny submit powinien dac czytelny komunikat limitu.
-9. Sprawdz limit aktywnych requestow uczestnika: `pending`, `approved` i `now` licza sie do limitu; `done`, `rejected`, `skipped` nie powinny.
-10. Sprawdz `my-requests` tracking:
+8. Potwierdz, ze request trafia do backendu jako `pending`.
+9. Sprawdz, ze `myRequests` pokazuje zgloszenie tej przegladarki.
+10. Sprawdz cooldown: szybki kolejny submit powinien dac czytelny komunikat limitu.
+11. Sprawdz limit aktywnych requestow uczestnika: `pending`, `approved` i `now` licza sie do limitu; `done`, `rejected`, `skipped` nie powinny.
+12. Sprawdz `my-requests` tracking:
      - po approve komunikat zmienia sie na zatwierdzony;
      - po start komunikat zmienia sie na "teraz twoja kolej";
      - po reject/skip/done komunikat pokazuje koncowy status.
-11. Dla `joinAccessMode=invite_required` sprawdz, ze bez claim formularz jest zablokowany.
-12. Otworz `/invite/<inviteCode>`, potwierdz redirect do `/event/<eventPublicId>/session` i ponow submit.
-13. Potwierdz, ze `publicJoinEnabled=false` blokuje submit takze po claim.
+13. Dla `joinAccessMode=invite_required` sprawdz, ze landing pozostaje widoczny, ale session bez claim pokazuje gate bez `JoinForm` i pol piosenki.
+14. Potwierdz bezposrednim requestem API, ze submit bez participant access jest zablokowany backendowo.
+15. Otworz `/invite/<inviteCode>`, potwierdz claim i redirect do `/event/<eventPublicId>/session`, a nastepnie ponow submit.
+16. Potwierdz, ze access opiera sie na participant cookie/access policy, a nie na ukrytym URL-u.
+17. Potwierdz, ze `publicJoinEnabled=false` blokuje submit takze po claim.
+
+### 4.1 Invite rotate / revoke
+
+- [ ] Po rotate stary invite nie nadaje nowego accessu.
+- [ ] Po rotate nowy invite nadaje access i kieruje do `/event/<eventPublicId>/session`.
+- [ ] Participant, ktory uzyskal access przed rotate, nadal moze korzystac z session.
+- [ ] Po revoke kod nie nadaje nowego accessu.
+- [ ] Participant, ktory uzyskal access przed revoke, nadal moze korzystac z session.
+- [ ] Revoke nie jest traktowany jako reset antyspamowy ani cofniecie participant access.
+
+### 4.2 Closed submissions
+
+- [ ] Landing pokazuje, ze zgloszenia sa zamkniete.
+- [ ] Session nie renderuje `JoinForm`.
+- [ ] Bezposredni submit API jest zablokowany.
+- [ ] Kolejka pozostaje widoczna tylko wtedy, gdy pozwala na to public queue policy.
 
 ## 5. Operator Queue Flow
 
@@ -125,8 +146,8 @@ Poczekaj na zatwierdzenie prowadzacego.
 
 - [ ] Uczestnik wysyla request w public join.
 - [ ] Operator widzi pending bez manualnego reloadu, po zdarzeniu SSE.
-- [ ] Operator approve/start/done aktualizuje public queue i status uczestnika.
-- [ ] Public queue reaguje na `queue.updated` przez pojedynczy refetch snapshotu.
+- [ ] Operator approve/start/done aktualizuje kolejke i status uczestnika w participant session.
+- [ ] Kolejka w participant session reaguje na `queue.updated` przez pojedynczy refetch snapshotu.
 - [ ] Public join reaguje na zmiany statusu eventu: pause/resume/close.
 - [ ] SSE disconnect jest non-fatal: UI nie crashuje i nadal da sie uzyc manual refreshu.
 - [ ] Po nawigacji tam i z powrotem nie powstaja duplikaty subskrypcji.
@@ -152,6 +173,8 @@ Praktyczna kontrola w devtools:
 - [ ] Heartbeat `: ping` utrzymuje polaczenie przez timeout proxy.
 - [ ] Staging proxy Railway/Render nie buforuje SSE.
 - [ ] Przy wiecej niz jednej instancji API event przechodzi miedzy instancjami przez Redis Pub/Sub.
+- [ ] Po bledzie status zmienia sie na laczenie/reconnect, a po reconnect wraca do `Live`.
+- [ ] Reconnect nie tworzy drugiego `EventSource` i nie uruchamia pollingu.
 - [ ] Zapisano date, release SHA, przegladarki/urzadzenia, wykonawce QA i wynik kazdego punktu; brak evidence oznacza `NOT RUN`.
 
 ## 7. Public Queue Visibility
@@ -260,12 +283,12 @@ Sign-off:
 
 Scenariusz 5-10 minut:
 
-1. Pokaz public venue: `http://localhost:3000/demo-klub`.
-2. Pokaz join page i wyslij request jako uczestnik.
+1. Pokaz landing wydarzenia: `http://localhost:3000/event/<eventPublicId>`.
+2. Przejdz CTA do `/event/<eventPublicId>/session` i wyslij request jako uczestnik.
 3. Pokaz dashboard events: `http://localhost:3001/dashboard/events`.
 4. Otworz kolejke eventu przez `Otworz kolejke`.
 5. Pokaz pending request, kliknij `Approve`.
-6. Pokaz public queue: request jest w kolejce, pending nie byl publiczny.
+6. Pokaz kolejke w participant session: request jest w kolejce, pending nie byl publiczny.
 7. Kliknij `Start`; uczestnik widzi "Teraz twoja kolej".
 8. Kliknij `Done`; uczestnik widzi koncowy status.
 9. Wyslij drugi request i pokaz `Reject` albo `Skip`.
