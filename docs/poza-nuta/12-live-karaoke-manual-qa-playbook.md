@@ -2,6 +2,9 @@
 
 Ten playbook jest instrukcja recznego QA przed releasem albo demo live karaoke flow. Nie zastepuje testow automatycznych ani checklisty deploymentu. Ma pomoc czlowiekowi przejsc pelny scenariusz: uczestnik wysyla piosenke, operator prowadzi kolejke, publiczne widoki aktualizuja sie bez ujawniania danych prywatnych.
 
+Dla realnego beta staging smoke, klasyfikacji blockerow i tabeli evidence uzyj
+`21-beta-staging-smoke-runbook.md`.
+
 ## 1. Pre-flight
 
 - [ ] GitHub Actions jest zielony, w tym required check `Repository CI / Quality gates`.
