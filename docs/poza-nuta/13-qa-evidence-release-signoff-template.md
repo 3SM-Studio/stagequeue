@@ -2,6 +2,9 @@
 
 Skopiuj ten dokument dla konkretnego release albo demo i wypelnij po przejsciu `12-live-karaoke-manual-qa-playbook.md`. To jest raport dowodowy, nie playbook. Nie wpisuj sekretow, tokenow, pelnych cookie ani prywatnych danych uczestnikow.
 
+Dla beta staging session/invite flow wykonaj kroki z `21-beta-staging-smoke-runbook.md` i przenies tutaj tylko
+bezpieczne referencje do evidence.
+
 ## 1. Release / Demo Metadata
 
 | Field | Value |
