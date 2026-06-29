@@ -73,12 +73,20 @@ Use one row per scenario from the live karaoke manual QA playbook.
 | Event setup valid | Venue/org/event visible and active as expected |  |  |  |  |
 | Participant session validation | Missing fields show readable validation errors |  |  |  |  |
 | Participant submit | Request created as pending |  |  |  |  |
+| Invite-required without access | Landing visible; session gate; backend submit blocked |  |  |  |  |
+| Invite claim | Access granted and redirect to `/event/:eventPublicId/session` |  |  |  |  |
+| Invite rotate | Old code blocked; new code works; existing access remains |  |  |  |  |
+| Invite revoke | New claims blocked; existing access remains |  |  |  |  |
+| Closed submissions | No form; backend submit blocked; queue follows public policy |  |  |  |  |
 | Operator pending visibility | Pending appears in dashboard without F5 |  |  |  |  |
 | Approve/start/done flow | Request moves through approved/now/done |  |  |  |  |
 | Reject/skip flow | Rejected/skipped states visible where expected |  |  |  |  |
 | Queue move | Approved positions stay dense and ordered |  |  |  |  |
 | Public queue visibility | Pending/private notes hidden, now/approved visible |  |  |  |  |
 | Lifecycle pause/resume | Join closes/reopens without hard refresh |  |  |  |  |
+| Standalone public queue route | `/event/:eventPublicId/queue` returns controlled 404 |  |  |  |  |
+| SSE reconnect | Returns to Live with one EventSource and no polling |  |  |  |  |
+| Mobile QR flow | QR claim, session submit and myRequests work on mobile |  |  |  |  |
 | Failure handling | API/SSE errors are readable and non-fatal |  |  |  |  |
 
 ## 5. Live Karaoke Flow Evidence
