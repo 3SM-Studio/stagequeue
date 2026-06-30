@@ -118,8 +118,8 @@ export function PublicEventSessionView({
       <section className="hero">
         <div className="panel hero-copy">
           <p className="eyebrow">Sesja uczestnika · {state.venueLabel}</p>
-          <h1>{state.title}</h1>
-          <p className="lead">Dodaj piosenkę, śledź swoje zgłoszenia i obserwuj kolejkę wydarzenia na żywo.</p>
+          <h1>{state.sessionHeading}</h1>
+          <p className="lead">{state.sessionLead}</p>
           <div className="actions">
             <Link className="button secondary" href={`/event/${eventPublicId}`}>
               Wróć do wydarzenia
@@ -136,7 +136,7 @@ export function PublicEventSessionView({
             <strong>{state.statusLabel}</strong>
           </div>
           <div className="fact">
-            <span>Zgloszenia</span>
+            <span>Zgłoszenia</span>
             <strong>{state.submissionsLabel}</strong>
           </div>
           <div className="fact">
@@ -160,7 +160,12 @@ export function PublicEventSessionView({
         ) : detail.submissions.reason === "ACCESS_REQUIRED" ? (
           <>
             <h2>Wymagane zaproszenie</h2>
-            <p>Zeskanuj QR w lokalu, aby dołączyć do sesji.</p>
+            <p>Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu.</p>
+          </>
+        ) : state.isClosed ? (
+          <>
+            <h2>Wydarzenie zakończone</h2>
+            <p>Zgłoszenia są zamknięte.</p>
           </>
         ) : (
           <>
@@ -196,6 +201,8 @@ export function PublicEventSessionView({
           <PublicQueueView
             eventPublicId={eventPublicId}
             initialQueue={queue}
+            queueHeading={state.queueHeading}
+            submissionsLabel={state.submissionsLabel}
             onRealtimeRefresh={refreshParticipantState}
           />
         ) : (

@@ -8,10 +8,14 @@ import { createRefetchScheduler } from "../lib/refetchScheduler"
 export function PublicQueueView({
   eventPublicId,
   initialQueue,
+  queueHeading = "Następne zgłoszenia",
+  submissionsLabel,
   onRealtimeRefresh
 }: {
   eventPublicId: string
   initialQueue: PublicQueue
+  queueHeading?: string
+  submissionsLabel?: string
   onRealtimeRefresh?: () => void
 }) {
   const [queue, setQueue] = useState(initialQueue)
@@ -97,7 +101,7 @@ export function PublicQueueView({
         <div className="queue-header">
           <div>
             <p className="eyebrow">Kolejka</p>
-            <h2>Następne zgłoszenia</h2>
+            <h2>{queueHeading}</h2>
           </div>
           <button className="button secondary compact" type="button" onClick={() => void refresh()}>
             Odśwież
@@ -106,11 +110,10 @@ export function PublicQueueView({
 
         {error ? <p className="form-errors">{error}</p> : null}
 
-        {queue.submissions.enabled ? (
-          <p className="muted">Zgłoszenia są otwarte.</p>
-        ) : (
-          <p className="muted">Zgłoszenia są teraz wstrzymane.</p>
-        )}
+        <p className="muted">
+          {submissionsLabel ??
+            (queue.submissions.enabled ? "Zgłoszenia są otwarte." : "Zgłoszenia są teraz wstrzymane.")}
+        </p>
 
         {queue.queue.length > 0 ? (
           <ol className="queue-list">

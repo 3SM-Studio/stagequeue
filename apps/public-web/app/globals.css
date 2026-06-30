@@ -142,6 +142,23 @@ textarea {
   padding: 1.25rem;
 }
 
+.event-state-panel {
+  margin-bottom: 1.5rem;
+  border-color: rgba(216, 59, 76, 0.45);
+  background: #fff3f1;
+}
+
+.event-state-panel h2 {
+  margin: 0;
+  font-size: clamp(1.8rem, 5vw, 2.8rem);
+}
+
+.event-state-panel .lead {
+  margin-bottom: 0;
+  color: var(--foreground);
+  font-weight: 800;
+}
+
 .fact {
   padding: 1rem;
   border: 1px solid var(--border);

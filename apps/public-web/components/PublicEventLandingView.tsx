@@ -13,14 +13,17 @@ export function PublicEventLandingView({
   const state = getPublicEventPageState(detail)
   const location = [detail.venue.name, detail.venue.city].filter(Boolean).join(" · ")
   const startsAt = formatDiscoveryStart(detail.event.startsAt, detail.venue.timezone)
-  const submissionsMessage = detail.submissions.enabled
-    ? "Możesz przejść do sesji i dodać piosenkę."
-    : detail.submissions.reason === "ACCESS_REQUIRED"
-      ? "Zeskanuj QR w lokalu, aby dołączyć do sesji."
-      : "Zgłoszenia są zamknięte"
 
   return (
     <main className="page-shell">
+      {state.isClosed ? (
+        <section className="panel state-panel event-state-panel" aria-labelledby="closed-event-heading">
+          <p className="eyebrow">Status wydarzenia</p>
+          <h2 id="closed-event-heading">Wydarzenie zakończone</h2>
+          <p className="lead">Zgłoszenia są zamknięte</p>
+        </section>
+      ) : null}
+
       <section className="hero">
         <div className="panel hero-copy">
           <p className="eyebrow">{location}</p>
@@ -29,11 +32,15 @@ export function PublicEventLandingView({
             {startsAt ? `${startsAt}. ` : ""}
             Karaoke organizuje {detail.operatedByOrganization.name}.
           </p>
-          <div className="actions">
-            <Link className="button primary" href={`/event/${eventPublicId}/session`}>
-              {detail.submissions.enabled ? "Dołącz do sesji" : "Zobacz sesję"}
-            </Link>
-          </div>
+          {state.landingActionLabel ? (
+            <div className="actions">
+              <Link className="button primary" href={`/event/${eventPublicId}/session`}>
+                {state.landingActionLabel}
+              </Link>
+            </div>
+          ) : state.isClosed ? (
+            <p className="muted">Końcowa kolejka nie jest publiczna.</p>
+          ) : null}
         </div>
 
         <div className="panel venue-facts">
@@ -43,7 +50,7 @@ export function PublicEventLandingView({
           </div>
           <div className="fact">
             <span>Zgłoszenia</span>
-            <strong>{submissionsMessage}</strong>
+            <strong>{state.landingMessage}</strong>
           </div>
           <div className="fact">
             <span>Kolejka publiczna</span>

@@ -559,11 +559,19 @@ test("canonical landing, session, and invite routes remain event-scoped", () => 
     /JoinForm|PublicQueueView|EventSource|claimPublicInvite/,
   );
   assert.doesNotMatch(eventLandingSource, /\/queue/);
-  assert.match(eventLandingSource, /Zeskanuj QR w lokalu/);
+  assert.match(eventLandingSource, /state\.landingActionLabel/);
+  assert.match(eventLandingSource, /event-state-panel/);
+  assert.match(eventLandingSource, /Końcowa kolejka nie jest publiczna/);
+  assert.doesNotMatch(eventLandingSource, /Zobacz sesję/);
   assert.match(eventSessionSource, /<JoinForm eventPublicId=\{eventPublicId\}/);
   assert.match(
     eventSessionSource,
     /<PublicQueueView[\s\S]*eventPublicId=\{eventPublicId\}/,
+  );
+  assert.match(eventSessionSource, /queueHeading=\{state\.queueHeading\}/);
+  assert.match(
+    eventSessionSource,
+    /submissionsLabel=\{state\.submissionsLabel\}/,
   );
   assert.equal(eventSessionSource.match(/<PublicQueueView/g)?.length, 1);
   assert.doesNotMatch(eventSessionSource, /new EventSource/);
@@ -1095,8 +1103,14 @@ test("public-web event-first page maps detail response to view state", () => {
   assert.equal(state.title, "Friday Karaoke");
   assert.equal(state.venueLabel, "Klub X");
   assert.equal(state.statusLabel, "Wydarzenie aktywne");
-  assert.equal(state.submissionsLabel, "Zgloszenia sa otwarte");
+  assert.equal(state.submissionsLabel, "Zgłoszenia są otwarte");
   assert.equal(state.queueLabel, "Kolejka publiczna jest widoczna");
+  assert.equal(
+    state.landingMessage,
+    "Zgłoszenia są otwarte. Możesz przejść do sesji i dodać piosenkę.",
+  );
+  assert.equal(state.landingActionLabel, "Dołącz do sesji");
+  assert.equal(state.isClosed, false);
 });
 
 test("public-web event state keeps queue visibility separate from submit access", () => {
@@ -1114,6 +1128,7 @@ test("public-web event state keeps queue visibility separate from submit access"
   });
 
   assert.equal(state.queueLabel, "Kolejka publiczna jest ukryta");
+  assert.equal(state.landingActionLabel, "Dołącz do sesji");
 });
 
 test("public-web invite-required event without access maps to access required state", () => {
@@ -1131,8 +1146,14 @@ test("public-web invite-required event without access maps to access required st
 
   assert.equal(
     state.submissionsLabel,
-    "Zeskanuj QR w lokalu, aby dołączyć do sesji.",
+    "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu",
   );
+  assert.equal(
+    state.landingMessage,
+    "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu",
+  );
+  assert.equal(state.landingActionLabel, "Zobacz kolejkę");
+  assert.equal(state.isAccessRequired, true);
 });
 
 test("public-web invite-required state renders QR guidance instead of JoinForm", () => {
@@ -1150,7 +1171,7 @@ test("public-web invite-required state renders QR guidance instead of JoinForm",
 
   assert.match(
     accessRequiredBranch,
-    /Zeskanuj QR w lokalu, aby dołączyć do sesji\./,
+    /Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu\./,
   );
   assert.doesNotMatch(accessRequiredBranch, /<JoinForm/);
 });
@@ -1163,14 +1184,107 @@ test("public-web closed session state does not render JoinForm", () => {
   const accessRequiredIndex = source.indexOf(
     'detail.submissions.reason === "ACCESS_REQUIRED"',
   );
-  const closedBranchStart = source.indexOf(") : (", accessRequiredIndex);
+  const closedBranchStart = source.indexOf(
+    ") : state.isClosed ? (",
+    accessRequiredIndex,
+  );
   const closedBranch = source.slice(
     closedBranchStart,
-    source.indexOf("</section>", closedBranchStart),
+    source.indexOf(") : (", closedBranchStart),
   );
 
+  assert.match(closedBranch, /Wydarzenie zakończone/);
   assert.match(closedBranch, /Zgłoszenia są zamknięte/);
   assert.doesNotMatch(closedBranch, /<JoinForm/);
+});
+
+test("public-web closed event uses final queue CTA and read-only session copy", () => {
+  const detail = validPublicEventDetailResponse();
+  const state = getPublicEventPageState({
+    ...detail,
+    event: {
+      ...detail.event,
+      status: "closed",
+    },
+    submissions: {
+      enabled: false,
+      reason: "EVENT_NOT_ACTIVE",
+    },
+  });
+
+  assert.equal(state.isClosed, true);
+  assert.equal(state.submissionsLabel, "Zgłoszenia są zamknięte");
+  assert.equal(state.landingMessage, "Zgłoszenia są zamknięte");
+  assert.equal(state.landingActionLabel, "Zobacz końcową kolejkę");
+  assert.equal(state.sessionHeading, "Wydarzenie zakończone");
+  assert.match(state.sessionLead, /Zgłoszenia są zamknięte/);
+  assert.equal(state.queueHeading, "Końcowa kolejka");
+});
+
+test("public-web closed event with hidden queue has no session CTA", () => {
+  const detail = validPublicEventDetailResponse();
+  const state = getPublicEventPageState({
+    ...detail,
+    event: {
+      ...detail.event,
+      status: "closed",
+      publicQueueEnabled: false,
+    },
+    submissions: {
+      enabled: false,
+      reason: "EVENT_NOT_ACTIVE",
+    },
+    publicQueue: {
+      visible: false,
+      reason: "PUBLIC_QUEUE_DISABLED",
+    },
+  });
+
+  assert.equal(state.landingActionLabel, null);
+  assert.match(state.sessionLead, /Kolejka nie jest publiczna/);
+});
+
+test("public-web queue visibility remains independent from closed and invite access states", () => {
+  const detail = validPublicEventDetailResponse();
+  const closedWithQueue = getPublicEventPageState({
+    ...detail,
+    event: {
+      ...detail.event,
+      status: "closed",
+    },
+    submissions: {
+      enabled: false,
+      reason: "EVENT_NOT_ACTIVE",
+    },
+  });
+  const inviteRequiredWithoutQueue = getPublicEventPageState({
+    ...detail,
+    event: {
+      ...detail.event,
+      joinAccessMode: "invite_required",
+      publicQueueEnabled: false,
+    },
+    submissions: {
+      enabled: false,
+      reason: "ACCESS_REQUIRED",
+    },
+    publicQueue: {
+      visible: false,
+      reason: "PUBLIC_QUEUE_DISABLED",
+    },
+  });
+
+  assert.equal(closedWithQueue.queueLabel, "Kolejka publiczna jest widoczna");
+  assert.equal(closedWithQueue.landingActionLabel, "Zobacz końcową kolejkę");
+  assert.equal(
+    inviteRequiredWithoutQueue.landingMessage,
+    "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu",
+  );
+  assert.equal(
+    inviteRequiredWithoutQueue.queueLabel,
+    "Kolejka publiczna jest ukryta",
+  );
+  assert.equal(inviteRequiredWithoutQueue.landingActionLabel, null);
 });
 
 test("public-web join disabled stays disabled even for invite-required event", () => {
@@ -1187,7 +1301,7 @@ test("public-web join disabled stays disabled even for invite-required event", (
     },
   });
 
-  assert.equal(state.submissionsLabel, "Zgloszenia publiczne sa wylaczone");
+  assert.equal(state.submissionsLabel, "Zgłoszenia publiczne są wyłączone");
 });
 
 test("public-web join page policy does not open the form for paused events", () => {
