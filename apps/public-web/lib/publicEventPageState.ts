@@ -6,16 +6,91 @@ export type PublicEventPageState = {
   statusLabel: string
   submissionsLabel: string
   queueLabel: string
+  isClosed: boolean
+  isAccessRequired: boolean
+  landingMessage: string
+  landingActionLabel: string | null
+  sessionHeading: string
+  sessionLead: string
+  queueHeading: string
 }
 
 export function getPublicEventPageState(detail: PublicEventDetail): PublicEventPageState {
+  const isClosed = detail.event.status === "closed"
+  const isAccessRequired = detail.submissions.reason === "ACCESS_REQUIRED"
+
   return {
     title: detail.event.name,
     venueLabel: detail.venue.name,
     statusLabel: eventStatusLabel(detail.event.status),
-    submissionsLabel: detail.submissions.enabled ? "Zgloszenia sa otwarte" : submissionsClosedLabel(detail.submissions.reason),
-    queueLabel: detail.publicQueue.visible ? "Kolejka publiczna jest widoczna" : publicQueueHiddenLabel(detail.publicQueue.reason)
+    submissionsLabel: isClosed
+      ? "Zgłoszenia są zamknięte"
+      : detail.submissions.enabled
+        ? "Zgłoszenia są otwarte"
+        : submissionsClosedLabel(detail.submissions.reason),
+    queueLabel: detail.publicQueue.visible
+      ? "Kolejka publiczna jest widoczna"
+      : publicQueueHiddenLabel(detail.publicQueue.reason),
+    isClosed,
+    isAccessRequired,
+    landingMessage: landingMessage(detail, isClosed, isAccessRequired),
+    landingActionLabel: landingActionLabel(detail, isClosed, isAccessRequired),
+    sessionHeading: isClosed ? "Wydarzenie zakończone" : detail.event.name,
+    sessionLead: sessionLead(detail, isClosed, isAccessRequired),
+    queueHeading: isClosed ? "Końcowa kolejka" : "Następne zgłoszenia"
   }
+}
+
+function landingMessage(detail: PublicEventDetail, isClosed: boolean, isAccessRequired: boolean): string {
+  if (isClosed) {
+    return "Zgłoszenia są zamknięte"
+  }
+  if (detail.submissions.enabled) {
+    return "Zgłoszenia są otwarte. Możesz przejść do sesji i dodać piosenkę."
+  }
+  if (isAccessRequired) {
+    return "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu"
+  }
+
+  return submissionsClosedLabel(detail.submissions.reason)
+}
+
+function landingActionLabel(
+  detail: PublicEventDetail,
+  isClosed: boolean,
+  isAccessRequired: boolean
+): string | null {
+  if (isClosed) {
+    return detail.publicQueue.visible ? "Zobacz końcową kolejkę" : null
+  }
+  if (detail.submissions.enabled) {
+    return "Dołącz do sesji"
+  }
+  if (isAccessRequired) {
+    return detail.publicQueue.visible ? "Zobacz kolejkę" : null
+  }
+
+  return detail.publicQueue.visible ? "Zobacz sesję" : null
+}
+
+function sessionLead(detail: PublicEventDetail, isClosed: boolean, isAccessRequired: boolean): string {
+  if (isClosed) {
+    return detail.publicQueue.visible
+      ? `${detail.event.name}. Zgłoszenia są zamknięte. Poniżej znajdziesz końcową kolejkę wydarzenia.`
+      : `${detail.event.name}. Zgłoszenia są zamknięte. Kolejka nie jest publiczna.`
+  }
+  if (detail.submissions.enabled) {
+    return "Dodaj piosenkę, śledź swoje zgłoszenia i obserwuj kolejkę wydarzenia na żywo."
+  }
+  if (isAccessRequired) {
+    return detail.publicQueue.visible
+      ? "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu. Publiczną kolejkę możesz oglądać bez dodawania piosenki."
+      : "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu."
+  }
+
+  return detail.publicQueue.visible
+    ? "Zgłoszenia nie są teraz dostępne. Nadal możesz obserwować publiczną kolejkę."
+    : "Zgłoszenia nie są teraz dostępne."
 }
 
 function eventStatusLabel(status: string): string {
@@ -29,7 +104,7 @@ function eventStatusLabel(status: string): string {
     return "Wydarzenie wstrzymane"
   }
   if (status === "closed") {
-    return "Wydarzenie zakonczone"
+    return "Wydarzenie zakończone"
   }
 
   return status
@@ -37,16 +112,16 @@ function eventStatusLabel(status: string): string {
 
 function submissionsClosedLabel(reason: string | undefined): string {
   if (reason === "EVENT_NOT_ACTIVE") {
-    return "Zgloszenia nie sa teraz przyjmowane"
+    return "Zgłoszenia nie są teraz przyjmowane"
   }
   if (reason === "PUBLIC_JOIN_DISABLED") {
-    return "Zgloszenia publiczne sa wylaczone"
+    return "Zgłoszenia publiczne są wyłączone"
   }
   if (reason === "ACCESS_REQUIRED") {
-    return "Zeskanuj QR w lokalu, aby dołączyć do sesji."
+    return "Dołączenie do kolejki wymaga kodu QR dostępnego w lokalu"
   }
 
-  return "Zgloszenia sa zamkniete"
+  return "Zgłoszenia są zamknięte"
 }
 
 function publicQueueHiddenLabel(reason: string | undefined): string {
@@ -57,5 +132,5 @@ function publicQueueHiddenLabel(reason: string | undefined): string {
     return "Kolejka nie jest teraz publicznie widoczna"
   }
 
-  return "Kolejka publiczna jest niedostepna"
+  return "Kolejka publiczna jest niedostępna"
 }
