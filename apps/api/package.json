@@ -17,7 +17,7 @@
     "@poza-nuta/db": "workspace:*",
     "@poza-nuta/domain": "workspace:*",
     "@redis/client": "^6.0.1",
-    "better-auth": "^1.6.11",
+    "better-auth": "^1.6.13",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.8.5"
   }
